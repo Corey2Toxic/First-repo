@@ -20,6 +20,7 @@ import { projectCostPerCell, validProjectCells } from '../sim/systems/projects.t
 import { COST } from '../sim/economyParams.ts';
 import { saveToSlot } from './storage.ts';
 import { Advisor } from './advisor.ts';
+import { FrameClock } from './frameClock.ts';
 import { AudioEngine } from '../audio/audio.ts';
 
 export type ToolId =
@@ -99,8 +100,8 @@ export class GameSession {
   toasts: Toast[] = [];
   private listeners = new Set<() => void>();
   private raf = 0;
-  private last = 0;
-  private acc = 0;
+  /** Frame timing, the simulation's time accrual and the fps / ticks-per-second counters. */
+  readonly clock = new FrameClock();
   private lastUi = 0;
   private lastLens = 0;
   private lensBuf: Uint8Array;
@@ -113,10 +114,6 @@ export class GameSession {
   private mapCanvas: HTMLCanvasElement;
   private overlayCanvas: HTMLCanvasElement;
   private disposers: Array<() => void> = [];
-  fps = 60;
-  ticksPerSec = 0;
-  private tickCount = 0;
-  private tickWindow = 0;
   lastSaved = '';
   onEnd: (() => void) | null = null;
 
@@ -139,9 +136,17 @@ export class GameSession {
     this.bindInput();
   }
 
+  get fps(): number {
+    return this.clock.fps;
+  }
+
+  get ticksPerSec(): number {
+    return this.clock.ticksPerSec;
+  }
+
   // ------------------------------------------------------------ lifecycle
   start(): void {
-    this.last = performance.now();
+    this.clock.reset(performance.now());
     const loop = (t: number) => {
       this.frame(t);
       this.raf = requestAnimationFrame(loop);
@@ -189,6 +194,7 @@ export class GameSession {
   setSpeed(s: number): void {
     if (s > 0) this.prevSpeed = s;
     this.speed = s;
+    this.clock.capBacklog(SPEEDS[s] ?? 0);
     this.audio.resume();
     this.emit();
   }
@@ -198,32 +204,23 @@ export class GameSession {
   }
 
   private frame(now: number): void {
-    const dt = Math.min(0.1, (now - this.last) / 1000);
-    this.last = now;
-    this.fps = this.fps * 0.95 + (dt > 0 ? 1 / dt : 60) * 0.05;
+    const clock = this.clock;
+    // the camera animates with a capped step; the simulation and the counters use real time (D23)
+    const dt = clock.beginFrame(now);
     this.panKeys(dt);
     this.cam.update(dt);
     const w = this.world;
     if (!this.sim.blocked && this.speed > 0 && !this.advisor.blockingStep) {
-      this.acc += dt * SPEEDS[this.speed];
-      const budget = 14;
-      const t0 = performance.now();
-      while (this.acc >= 1 && performance.now() - t0 < budget) {
+      clock.advance(SPEEDS[this.speed], () => {
         this.sim.tick();
-        this.acc -= 1;
-        this.tickCount++;
-        if (this.sim.blocked) break;
+        if (this.sim.blocked) return false;
         if (w.sub === 0 && w.doy % 90 === 0) this.autosave();
-        if (this.checkNewFires()) break;
-      }
-      if (this.acc > 3) this.acc = 3;
+        return !this.checkNewFires();
+      });
+      // time may have been slowed for a new fire: owe no more than the new speed allows
+      clock.capBacklog(SPEEDS[this.speed]);
     }
-    this.tickWindow += dt;
-    if (this.tickWindow > 1) {
-      this.ticksPerSec = this.tickCount / this.tickWindow;
-      this.tickCount = 0;
-      this.tickWindow = 0;
-    }
+    clock.endFrame();
     if (w.outcome.ended && this.onEnd) {
       const f = this.onEnd;
       this.onEnd = null;
@@ -265,8 +262,8 @@ export class GameSession {
       showLabels: this.settings.labels,
       showWildlife: this.settings.wildlife || this.lens === 'wildlife',
       revealFires: this.settings.reveal,
-      tickAlpha: Math.min(1, this.acc),
-      dayAlpha: Math.min(1, (w.sub + Math.min(1, this.acc)) / SUBSTEPS_PER_DAY),
+      tickAlpha: Math.min(1, clock.acc),
+      dayAlpha: Math.min(1, (w.sub + Math.min(1, clock.acc)) / SUBSTEPS_PER_DAY),
       time: now / 1000,
       towerRadius: this.tool.id === 'tower',
     };
