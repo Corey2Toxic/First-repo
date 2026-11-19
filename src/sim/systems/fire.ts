@@ -28,7 +28,7 @@ export function fireName(w: World, x: number, y: number): string {
   let bd = Infinity;
   for (const m of w.landmarks) {
     const d = Math.hypot(m.x - x, m.y - y) / (m.kind === 'town' ? 0.6 : m.kind === 'creek' ? 1.2 : 1);
-    if (d < bd && d < 34) {
+    if (d < bd && d < 60) {
       bd = d;
       best = m.name;
     }

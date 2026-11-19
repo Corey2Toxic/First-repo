@@ -44,5 +44,7 @@ export function hazardIndex(w: World, i: number): number {
   const f = cellFuel(w, i);
   const surface = smoothstep(2, 22, f.fine);
   const crown = f.canopy * smoothstep(0.1, 0.7, f.ladder);
-  return clamp01(0.55 * surface + 0.45 * crown * (0.4 + 0.6 * surface));
+  // wet hollows and stream banks rarely carry fire, whatever grows there
+  const wet = 1 - 0.6 * smoothstep(0.55, 0.9, w.L.twi[i]) - (w.L.pond[i] > 0.05 ? 0.4 : 0);
+  return clamp01((0.55 * surface + 0.45 * crown * (0.4 + 0.6 * surface)) * wet);
 }

@@ -19,6 +19,7 @@ import {
 } from './settle.ts';
 import { initWildlife } from './wildlife.ts';
 import { initCrews } from './crews.ts';
+import { updateFirewise } from '../systems/towns.ts';
 
 export function generateWorld(config: GameConfig): World {
   const w = new World(config);
@@ -69,5 +70,6 @@ export function generateWorld(config: GameConfig): World {
   nameLandmarks(w, names, info);
   initWildlife(w, rng.fork('wildlife'), names);
   initCrews(w, names);
+  updateFirewise(w);
   return w;
 }

@@ -139,8 +139,8 @@ void main() {
   vec3 rockC = mix(vec3(0.50, 0.50, 0.49), vec3(0.70, 0.68, 0.64), fbm(world * 2.7 + 5.0));
   vec3 col = mix(soil, rockC, rock);
   float green = M.g;
-  vec3 grassC = mix(vec3(0.78, 0.69, 0.42), vec3(0.42, 0.58, 0.25), green);
-  grassC = mix(grassC, vec3(0.68, 0.58, 0.40), (1.0 - green) * 0.25);
+  vec3 grassC = mix(vec3(0.66, 0.60, 0.42), vec3(0.40, 0.56, 0.26), green);
+  grassC = mix(grassC, vec3(0.58, 0.52, 0.40), (1.0 - green) * 0.35 * fbm(world * 0.35 + 3.0));
   grassC *= 0.88 + 0.24 * vnoise(world * 5.0);
   float gcov = clamp(V.r * 1.15, 0.0, 1.0) * (1.0 - 0.5 * rock);
   col = mix(col, grassC, gcov);
@@ -235,20 +235,20 @@ void main() {
     float inCrown = 0.0;
     vec3 crown = vec3(0.0);
     float shapeR = 1.0;
-    if (h < min(0.98, tot)) {
+    if (h < min(0.985, tot * 1.45)) {
       float t = h2 * tot;
       if (t < ca) { crown = aspC; shapeR = 0.85; inCrown = leaf; }
       else if (t < ca + cp) { crown = pineC; shapeR = 1.0; inCrown = 1.0; }
       else if (t < ca + cp + cf) { crown = firC; shapeR = 0.8; inCrown = 1.0; }
       else { crown = redC; shapeR = 0.9; inCrown = 1.0; }
-    } else if (h < tot + cs * 0.5) {
+    } else if (h < tot * 1.45 + cs * 0.5) {
       crown = snagC; shapeR = 0.38; inCrown = 0.9;
     }
     // shadow cast to the south-east
     vec4 bs = blobs(world - vec2(0.09, 0.09), 3.2, 0.48);
     vec2 suv = bs.zw / uGrid;
     float stot = texture(tVeg, suv).b + texture(tVeg, suv).a + texture(tVeg2, suv).r + texture(tVeg2, suv).a;
-    float shadow = step(bs.y, min(0.98, stot)) * (1.0 - smoothstep(0.7, 1.0, bs.x)) * 0.45;
+    float shadow = step(bs.y, min(0.985, stot * 1.45)) * (1.0 - smoothstep(0.7, 1.0, bs.x)) * 0.45;
     groundLit *= 1.0 - shadow;
     float d = b.x / shapeR;
     float edge = 1.0 - smoothstep(0.8, 1.0, d);
@@ -263,10 +263,10 @@ void main() {
       result = groundLit;
     }
     // blend toward flat colour as crowns become sub-pixel
-    vec3 flat_ = mix(col, canopyAvg, canopyCov * 0.9) * light;
+    vec3 flat_ = mix(col, canopyAvg, min(1.0, canopyCov * 1.3)) * light;
     result = mix(result, flat_, lodT);
   } else {
-    result = mix(col, canopyAvg, canopyCov * 0.9 * (1.0 - isWater)) * light;
+    result = mix(col, canopyAvg, min(1.0, canopyCov * 1.3) * (1.0 - isWater)) * light;
   }
 
   // snow on the ground (under/around trees)
@@ -341,7 +341,7 @@ void main() {
     result = mix(result, result * 0.62, clamp(c * 0.35 + major * 0.35, 0.0, 0.6) * uContours * (1.0 - isWater));
   }
   vec4 ov = texture(tOverlay, uv);
-  result = mix(result, ov.rgb, ov.a * uOverlayMix);
+  result = mix(result, ov.rgb * (0.62 + 0.5 * diff), ov.a * uOverlayMix);
   if (uGridLines > 0.0 && px < 0.12) {
     vec2 fc = fract(world);
     float g = step(fc.x, px * 1.0) + step(fc.y, px * 1.0);
