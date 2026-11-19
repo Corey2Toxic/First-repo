@@ -312,6 +312,9 @@ export class MapRenderer {
   }
 
   draw(cam: Camera, w: World, time: number, opts: RenderOptions, canvasW: number, canvasH: number): void {
+    // the renderer is shared by the title backdrop and every session: a loop still running for a
+    // world it is no longer bound to must not write that world into these buffers
+    if (w !== this.world) return;
     const gl = this.gl;
     this.refresh(w, false, opts);
     gl.viewport(0, 0, canvasW, canvasH);

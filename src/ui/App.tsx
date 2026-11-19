@@ -26,6 +26,7 @@ function renderer(): MapRenderer {
 /** A slowly drifting view of a generated valley behind the menus. */
 class Backdrop {
   private raf = 0;
+  private stopped = false;
   private cam = new Camera();
   private world: World;
   private t0 = performance.now();
@@ -37,6 +38,7 @@ class Backdrop {
     this.resize();
     this.cam.fit();
     const loop = (t: number) => {
+      if (this.stopped) return;
       this.frame(t);
       this.raf = requestAnimationFrame(loop);
     };
@@ -71,45 +73,111 @@ class Backdrop {
     renderer().draw(this.cam, w, k, { overlayMix: 0, zoneMix: 0, contours: false, gridLines: false, revealFires: true }, c.width, c.height);
   }
   stop(): void {
+    this.stopped = true;
     cancelAnimationFrame(this.raf);
   }
 }
 
 type Screen = 'title' | 'about' | 'new' | 'loading' | 'game' | 'error';
 
+interface Failure {
+  title: string;
+  detail: string;
+  /** Fireweed never got going (no WebGL 2, most likely). */
+  startup: boolean;
+  /** The title screen is still intact and can be shown again. */
+  canReturn: boolean;
+}
+
+const canvas = (id: string) => document.getElementById(id) as HTMLCanvasElement;
+const message = (e: unknown) => String((e as Error)?.message ?? e);
+
 export function App() {
   const [screen, setScreen] = useState<Screen>('loading');
-  const [error, setError] = useState('');
+  const [failure, setFailure] = useState<Failure>({ title: '', detail: '', startup: true, canReturn: false });
   const [loadingMsg, setLoadingMsg] = useState('Surveying the valley…');
   const [session, setSession] = useState<GameSession | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const backdrop = useRef<Backdrop | null>(null);
+  /** The running session. Transitions finish asynchronously, so they read it here, never from a stale render. */
+  const current = useRef<GameSession | null>(null);
   const preview = useRef<{ key: string; world: World } | null>(null);
+
+  /** Put the title valley behind the menus. Throws if it cannot be built. */
+  const showBackdrop = () => {
+    backdrop.current?.stop();
+    backdrop.current = null;
+    const w = generateWorld(makeConfig('firstseason', 'fireweed-title', 'small'));
+    w.day = 200; // autumn colours on the title
+    backdrop.current = new Backdrop(w);
+  };
+
+  /**
+   * A transition failed. Unless the title is still intact (a save that would not open, a
+   * valley that would not generate), stop everything that draws to the shared canvas and
+   * offer a reload: v1.0 left a permanent loading screen instead.
+   */
+  const fail = (title: string, e: unknown, canReturn = false) => {
+    console.error(e);
+    if (!canReturn) {
+      backdrop.current?.stop();
+      backdrop.current = null;
+      current.current?.dispose();
+      current.current = null;
+      setSession(null);
+    }
+    setFailure({ title, detail: message(e), startup: false, canReturn });
+    setScreen('error');
+  };
 
   useEffect(() => {
     // first paint, then build the title backdrop
     setTimeout(() => {
       try {
-        const w = generateWorld(makeConfig('firstseason', 'fireweed-title', 'small'));
-        w.day = 200; // autumn colours on the title
-        backdrop.current = new Backdrop(w);
+        showBackdrop();
         setScreen('title');
       } catch (e) {
-        setError(String((e as Error).message ?? e));
+        setFailure({ title: 'Fireweed cannot start', detail: message(e), startup: true, canReturn: false });
         setScreen('error');
       }
     }, 30);
   }, []);
 
+  /** Open a world: the new session is built before the old one (or the backdrop) is let go. */
   const startWorld = (w: World) => {
+    let s: GameSession;
+    try {
+      s = new GameSession(w, canvas('map'), canvas('overlay'), renderer());
+    } catch (e) {
+      // the shared renderer may already hold the new world: nothing else can go on drawing
+      fail('This valley could not be opened', e);
+      return;
+    }
     backdrop.current?.stop();
     backdrop.current = null;
-    session?.dispose();
-    const s = new GameSession(w, document.getElementById('map') as HTMLCanvasElement, document.getElementById('overlay') as HTMLCanvasElement, renderer());
+    current.current?.dispose();
+    current.current = s;
     setSession(s);
     setScreen('game');
     s.start();
     (window as unknown as { fireweed: GameSession }).fireweed = s;
+  };
+
+  /** Leave the game for the title or the new-game screen (quit, or "New valley" after the legacy report). */
+  const leaveGame = (next: 'title' | 'new') => {
+    current.current?.dispose();
+    current.current = null;
+    setSession(null);
+    setLoadingMsg(next === 'title' ? 'Returning to the title…' : 'Preparing a new valley…');
+    setScreen('loading');
+    setTimeout(() => {
+      try {
+        showBackdrop();
+        setScreen(next);
+      } catch (e) {
+        fail('Fireweed could not return to the title', e);
+      }
+    }, 20);
   };
 
   const generate = (scenario: ScenarioId, seed: string, size: MapSize, overrides: Partial<GameConfig>): World => {
@@ -122,26 +190,27 @@ export function App() {
     return generateWorld(makeConfig(scenario, seed, size, overrides));
   };
 
-  const toTitle = () => {
-    session?.dispose();
-    setSession(null);
-    setScreen('loading');
-    setLoadingMsg('…');
-    setTimeout(() => {
-      const w = generateWorld(makeConfig('firstseason', 'fireweed-title', 'small'));
-      w.day = 200;
-      backdrop.current = new Backdrop(w);
-      setScreen('title');
-    }, 20);
-  };
-
   if (screen === 'error')
     return (
       <div class="screen">
         <div class="modal" style={{ maxWidth: '560px' }}>
-          <h1>Fireweed cannot start</h1>
-          <p class="dim">{error}</p>
-          <p class="dim">Fireweed needs a browser with WebGL 2 (any recent Chrome, Edge, Firefox or Safari).</p>
+          <h1>{failure.title}</h1>
+          <p class="dim">{failure.detail}</p>
+          {failure.startup ? (
+            <p class="dim">Fireweed needs a browser with WebGL 2 (any recent Chrome, Edge, Firefox or Safari).</p>
+          ) : (
+            <p class="dim">Your saved games are safe: saves and autosaves are kept in this browser and nothing has been overwritten. Reload to carry on from your latest save.</p>
+          )}
+          <div class="row" style={{ marginTop: '16px', justifyContent: 'flex-end', gap: '8px' }}>
+            {failure.canReturn ? (
+              <button class="btn" onClick={() => setScreen('title')}>
+                Back to title
+              </button>
+            ) : null}
+            <button class="btn primary" onClick={() => location.reload()}>
+              Reload Fireweed
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -161,19 +230,14 @@ export function App() {
           setScreen('loading');
           loadSlot(slot)
             .then(startWorld)
-            .catch((e) => {
-              setError(String(e.message ?? e));
-              setScreen('error');
-            });
+            .catch((e) => fail('That save could not be opened', e, true));
         }}
         onImport={(f) => {
+          setLoadingMsg('Reading the save file…');
           setScreen('loading');
           importFile(f)
             .then(startWorld)
-            .catch((e) => {
-              setError(String(e.message ?? e));
-              setScreen('error');
-            });
+            .catch((e) => fail('That file could not be opened', e, true));
         }}
       />
     );
@@ -186,25 +250,35 @@ export function App() {
         onPreview={(scenario, seed, size, overrides) => {
           setPreviewing(true);
           setTimeout(() => {
-            const w = generateWorld(makeConfig(scenario, seed, size, overrides));
-            preview.current = { key: JSON.stringify([scenario, seed, size, overrides]), world: w };
-            backdrop.current?.setWorld(w);
-            setPreviewing(false);
+            try {
+              const w = generateWorld(makeConfig(scenario, seed, size, overrides));
+              preview.current = { key: JSON.stringify([scenario, seed, size, overrides]), world: w };
+              backdrop.current?.setWorld(w);
+            } catch (e) {
+              fail('The preview could not be drawn', e);
+            } finally {
+              setPreviewing(false);
+            }
           }, 30);
         }}
         onStart={(scenario, seed, size, overrides) => {
           setLoadingMsg('Growing forests, carving rivers, founding towns…');
           setScreen('loading');
-          setTimeout(() => startWorld(generate(scenario, seed, size, overrides)), 40);
+          setTimeout(() => {
+            let w: World;
+            try {
+              w = generate(scenario, seed, size, overrides);
+            } catch (e) {
+              fail('The valley could not be generated', e, true);
+              return;
+            }
+            startWorld(w);
+          }, 40);
         }}
       />
     );
   if (!session) return null;
-  return <GameScreen s={session} onLoad={startWorld} onQuit={toTitle} onNew={() => (session.dispose(), setSession(null), setScreen('loading'), setTimeout(() => {
-    const w = generateWorld(makeConfig('firstseason', 'fireweed-title', 'small'));
-    backdrop.current = new Backdrop(w);
-    setScreen('new');
-  }, 20))} />;
+  return <GameScreen s={session} onLoad={startWorld} onQuit={() => leaveGame('title')} onNew={() => leaveGame('new')} />;
 }
 
 function GameScreen({ s, onLoad, onQuit, onNew }: { s: GameSession; onLoad: (w: World) => void; onQuit: () => void; onNew: () => void }) {

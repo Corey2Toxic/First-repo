@@ -114,6 +114,7 @@ export class GameSession {
   private mapCanvas: HTMLCanvasElement;
   private overlayCanvas: HTMLCanvasElement;
   private disposers: Array<() => void> = [];
+  private disposed = false;
   lastSaved = '';
   onEnd: (() => void) | null = null;
 
@@ -123,17 +124,23 @@ export class GameSession {
     this.overlayCanvas = overlayCanvas;
     this.sim = new Simulation(world);
     this.renderer = renderer ?? new MapRenderer(mapCanvas);
-    this.renderer.setWorld(world);
-    this.overlay = new OverlayRenderer(overlayCanvas);
-    this.cam.setGrid(world.W, world.H);
     this.lensBuf = new Uint8Array(world.N * 4);
-    this.renderer.overlayData = this.lensBuf;
-    this.advisor = new Advisor(this);
-    this.audio = new AudioEngine();
-    this.detectedCount = world.fires.filter((f) => f.active && f.detected).length;
-    this.resize();
-    this.cam.fit();
-    this.bindInput();
+    try {
+      this.renderer.setWorld(world);
+      this.overlay = new OverlayRenderer(overlayCanvas);
+      this.cam.setGrid(world.W, world.H);
+      this.renderer.overlayData = this.lensBuf;
+      this.advisor = new Advisor(this);
+      this.audio = new AudioEngine();
+      this.detectedCount = world.fires.filter((f) => f.active && f.detected).length;
+      this.resize();
+      this.cam.fit();
+      this.bindInput();
+    } catch (e) {
+      // a half-built session must not leave listeners or a lens buffer behind on the shared canvases
+      this.dispose();
+      throw e;
+    }
   }
 
   get fps(): number {
@@ -146,22 +153,30 @@ export class GameSession {
 
   // ------------------------------------------------------------ lifecycle
   start(): void {
+    if (this.disposed) return;
     this.clock.reset(performance.now());
     const loop = (t: number) => {
+      if (this.disposed) return;
       this.frame(t);
-      this.raf = requestAnimationFrame(loop);
+      if (!this.disposed) this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
   }
 
+  /** Stop the loop and release everything shared with the next screen. Safe to call twice. */
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     cancelAnimationFrame(this.raf);
     // the renderer is shared with the title backdrop and the next session: release our lens buffer
-    if (this.renderer.overlayData === this.lensBuf) this.renderer.overlayData = null;
+    if (this.renderer && this.renderer.overlayData === this.lensBuf) this.renderer.overlayData = null;
     for (const d of this.disposers) d();
     this.disposers = [];
-    this.audio.stop();
+    this.audio?.stop();
     this.listeners.clear();
+    this.onEnd = null;
+    const g = globalThis as unknown as { fireweed?: unknown };
+    if (g.fireweed === this) delete g.fireweed;
   }
 
   subscribe(fn: () => void): () => void {
@@ -204,6 +219,7 @@ export class GameSession {
   }
 
   private frame(now: number): void {
+    if (this.disposed) return;
     const clock = this.clock;
     // the camera animates with a capped step; the simulation and the counters use real time (D23)
     const dt = clock.beginFrame(now);
