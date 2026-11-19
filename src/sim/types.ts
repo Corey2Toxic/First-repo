@@ -235,7 +235,9 @@ export interface ClimateState {
   yearWet: number; // multiplier on precipitation (~0.5..1.5)
   yearTemp: number; // °C anomaly
   trendPerDecade: number; // °C per decade warming
-  droughtIndex: number; // 0..1 running drought severity (KBDI-like)
+  droughtIndex: number; // 0..1 Keetch–Byram drought index / 800
+  /** mm of rain in the current wet spell (KBDI interception) */
+  rainSpell?: number;
   tempAR: number; // daily temperature AR(1) state
   rhAR: number;
   windAR: number;

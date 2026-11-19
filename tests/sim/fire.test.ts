@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { flatWorld } from '../helpers.ts';
-import { applyFireEffects, fireSubstep, moistureDamping, projectContains, startFire } from '../../src/sim/systems/fire.ts';
+import { applyFireEffects, fireSubstep, grassHeadRateKmh, lengthToBreadth, moistureDamping, projectContains, startFire, surfaceHeadRate } from '../../src/sim/systems/fire.ts';
+import { cellFuel } from '../../src/sim/systems/fuels.ts';
 import { createProject, igniteProjectBurn } from '../../src/sim/systems/projects.ts';
 import { FIRE } from '../../src/sim/types.ts';
 import type { Town } from '../../src/sim/types.ts';
@@ -206,5 +207,81 @@ describe('fire behaviour', () => {
     const w2 = decodeWorld(encodeWorld(w));
     expect(w2.L.fire[house]).toBe(FIRE.NONE);
     expect(w2.L.fid[house]).toBe(-1);
+  });
+
+  /** Head-fire distance (m/h) after one 3-hour afternoon step, mean of `n` replicate fires. */
+  function headRate(opts: Parameters<typeof flatWorld>[2], wind: number, n = 8): number {
+    let sum = 0;
+    for (let k = 0; k < n; k++) {
+      const w = flatWorld(400, 31, opts);
+      w.rng.fire = new Rng('head-' + k + JSON.stringify(opts) + wind);
+      w.weather.windSpeed = wind;
+      const fe = startFire(w, 15 * w.W + 10, 'human')!;
+      w.sub = 4;
+      fireSubstep(w);
+      let hx = 0;
+      for (let i = 0; i < w.N; i++) if (w.L.fid[i] === fe.id && Math.abs(((i / w.W) | 0) - 15) <= 1) hx = Math.max(hx, (i % w.W) - 10);
+      sum += (hx * 100) / 3;
+    }
+    return sum / n;
+  }
+
+  it('cured grass out-runs timber litter, and crown fire out-runs surface fire in the same timber (audit: inverted ordering)', () => {
+    const grass = { grass: 0.85, litter: 0.4, pine: 0, fir: 0 };
+    const pine = { grass: 0.25, pine: 0.55, litter: 8, fir: 0 };
+    for (const U of [3, 6, 12]) {
+      const g = headRate(grass, U),
+        p = headRate(pine, U);
+      expect(g).toBeGreaterThan(3 * p);
+    }
+    // published cured-grass head-fire rates at moderate wind are ~1–8 km/h; with the documented
+    // heterogeneity factor the game's grass runs ~1–3 km/h in a 6 m/s afternoon wind (v1.0: 40 m/h)
+    const g6 = headRate(grass, 6);
+    expect(g6).toBeGreaterThan(800);
+    expect(g6).toBeLessThan(4000);
+    // a long-needle pine litter surface fire runs tens to hundreds of m/h (v1.0: ~5–20 m/h)
+    const p6 = headRate(pine, 6);
+    expect(p6).toBeGreaterThan(40);
+    expect(p6).toBeLessThan(500);
+  });
+
+  it('the simulated front advances at the rate the model specifies (no first-passage speed-up)', () => {
+    // no wind: isotropic; the front should cover ~R·t, not several times it (v1.0: 3.7x)
+    const w0 = flatWorld(10, 10, { grass: 0.85, litter: 0.4 });
+    w0.weather.windSpeed = 0.3;
+    const f = cellFuel(w0, 55);
+    const di = 1.16; // diurnal spread factor at 15:00
+    const fm = w0.L.fm[55] - 0.015 + f.green * (0.06 + 0.06 * f.grassShare);
+    const spec = surfaceHeadRate(w0, 55, f, 0.3 * 1.26) * moistureDamping(fm / (0.15 + 0.13 * (1 - f.grassShare))) * di;
+    let sum = 0;
+    const n = 8;
+    for (let k = 0; k < n; k++) {
+      const w = flatWorld(121, 121, { grass: 0.85, litter: 0.4 });
+      w.rng.fire = new Rng('fpp-' + k);
+      w.weather.windSpeed = 0.3;
+      const fe = startFire(w, 60 * w.W + 60, 'human')!;
+      for (let s = 0; s < 4; s++) {
+        w.sub = 4;
+        fireSubstep(w);
+      }
+      let ex = 0;
+      for (let i = 0; i < w.N; i++) if (w.L.fid[i] === fe.id && ((i / w.W) | 0) === 60) ex = Math.max(ex, (i % w.W) - 60);
+      sum += (ex * 100) / 12;
+    }
+    const measured = sum / n;
+    expect(measured / spec).toBeGreaterThan(0.6);
+    expect(measured / spec).toBeLessThan(1.6);
+  });
+
+  it('rate building blocks follow the published forms', () => {
+    // CSIRO grassland model: ~1 km/h at 3.6 km/h wind, ~10 km/h at 20 km/h (before moisture/curing)
+    expect(grassHeadRateKmh(3.6)).toBeCloseTo(0.054 + 0.269 * 3.6, 6);
+    expect(grassHeadRateKmh(20)).toBeGreaterThan(8);
+    expect(grassHeadRateKmh(20)).toBeLessThan(11);
+    // fires elongate with wind; grass fires more than forest fires; never beyond 8:1
+    expect(lengthToBreadth(0, 0)).toBeCloseTo(1, 6);
+    expect(lengthToBreadth(30, 1)).toBeGreaterThan(lengthToBreadth(30, 0));
+    expect(lengthToBreadth(30, 0)).toBeGreaterThan(lengthToBreadth(10, 0));
+    expect(lengthToBreadth(200, 1)).toBeLessThanOrEqual(8);
   });
 });

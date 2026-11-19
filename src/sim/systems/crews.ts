@@ -41,7 +41,10 @@ function stepCost(w: World, kind: Crew['kind']) {
     if (road) return ROAD_HOURS_PER_CELL * d;
     if (kind === 'engine') {
       if (L.slope[to] > 0.35) return Infinity;
-      return d * 0.035 * (1 + 10 * L.slope[to]) * (1 + 0.8 * (L.shrub[to] + L.fir[to] + L.pine[to])) + (L.flowAcc[to] > 1000 ? 0.5 : 0);
+      const trees = L.fir[to] + L.pine[to] + 0.6 * L.aspen[to];
+      // open, gentle grass and shrub country can be driven (~8 km/h); timber and slopes crawl
+      if (L.slope[to] < 0.2 && trees < 0.3) return d * 0.012 * (1 + 6 * L.slope[to]) * (1 + L.shrub[to]) + (L.flowAcc[to] > 1000 ? 0.5 : 0);
+      return d * 0.035 * (1 + 10 * L.slope[to]) * (1 + 0.8 * (L.shrub[to] + trees)) + (L.flowAcc[to] > 1000 ? 0.5 : 0);
     }
     return d * 0.04 * (1 + 5 * L.slope[to]) * (1 + 0.8 * (L.shrub[to] + L.fir[to])) + (L.flowAcc[to] > 1000 ? 0.3 : 0);
   };
@@ -325,6 +328,16 @@ function nearestRoadTo(w: World, x: number, y: number): number {
   return best >= 0 ? best : Math.round(y) * w.W + Math.round(x);
 }
 
+/** Distance (cells) from a fire's centre to the nearest road, capped at 40. */
+function roadGap(w: World, fe: FireEvent): number {
+  const cx = (fe.minX + fe.maxX) / 2,
+    cy = (fe.minY + fe.maxY) / 2;
+  const r = nearestRoadTo(w, cx, cy);
+  if (!(w.L.infra[r] & INFRA.ROAD)) return 40;
+  const rad = Math.max(fe.maxX - fe.minX, fe.maxY - fe.minY) / 2;
+  return Math.max(0, Math.hypot((r % w.W) - cx, ((r / w.W) | 0) - cy) - rad);
+}
+
 /** Assign idle crews to fires that need them, by priority. */
 export function autoDispatch(w: World): void {
   if (!w.policies.autoDispatch) return;
@@ -346,7 +359,7 @@ export function autoDispatch(w: World): void {
     if (c.manual) continue;
     if (c.fatigue > 0.95) continue;
     for (const { fe, th } of scored) {
-      if (c.kind === 'engine' && th.dist > 16 && !fe.inBuffer) continue; // engines defend homes and roadsides
+      if (c.kind === 'engine' && th.dist > 16 && !fe.inBuffer && roadGap(w, fe) > 6) continue; // engines defend homes and roadsides
       if (fe.response === 'contain' && c.kind === 'hand' && th.dist > 20) continue;
       const want = (c.kind === 'hand' ? Math.min(4, 1 + Math.floor(Math.sqrt(fe.area) / 8)) : c.kind === 'engine' ? 2 : 1) + (fe.inBuffer && c.kind !== 'heli' ? 1 : 0);
       if (assigned(fe, c.kind) >= want) continue;
@@ -468,24 +481,44 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
   chargeFire(w, fe, hours, c.kind);
   c.hoursWorked += hours;
   if (c.kind === 'engine') {
-    // direct attack on low-intensity fire within hose reach, protect houses (see structureProtection)
+    // direct attack on low-intensity fire within hose reach, working along the edge ("pump and
+    // roll" across open grass, where an engine knocks down several times more edge than in timber);
+    // engines near a threatened town also protect houses (see structureProtection)
     let done = 0;
-    const cx = Math.floor(c.x),
-      cy = Math.floor(c.y);
-    const cap = WORK.mopUp.engine * (hours / HOURS);
-    for (let r = 0; r <= 3 && done < cap; r++)
-      for (let dy = -r; dy <= r && done < cap; dy++)
-        for (let dx = -r; dx <= r && done < cap; dx++) {
-          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    let budget = WORK.mopUp.engine * (hours / HOURS);
+    let ex = c.x,
+      ey = c.y;
+    for (let guard = 0; guard < 40 && budget > 0; guard++) {
+      let best = -1,
+        bd = Infinity;
+      const cx = Math.floor(ex),
+        cy = Math.floor(ey);
+      for (let dy = -3; dy <= 3; dy++)
+        for (let dx = -3; dx <= 3; dx++) {
           const x = cx + dx,
             y = cy + dy;
           if (!w.inside(x, y)) continue;
           const i = y * w.W + x;
-          if (L.fire[i] === FIRE.BURNING && L.fid[i] === fe.id && L.fint[i] < 0.6) {
-            extinguish(w, i);
-            done++;
+          if (L.fire[i] !== FIRE.BURNING || L.fid[i] !== fe.id || L.fint[i] >= 0.6 || L.town[i] > 0) continue;
+          const dd = dx * dx + dy * dy;
+          if (dd < bd) {
+            bd = dd;
+            best = i;
           }
         }
+      if (best < 0) break;
+      extinguish(w, best);
+      done++;
+      budget -= attackEffort(w, best);
+      // drive along the edge where the ground allows it
+      const trees = L.fir[best] + L.pine[best] + 0.6 * L.aspen[best];
+      if (L.slope[best] < 0.2 && trees < 0.3) {
+        ex = (best % w.W) + 0.5;
+        ey = ((best / w.W) | 0) + 0.5;
+      }
+    }
+    c.x = ex;
+    c.y = ey;
     // nothing in reach: drive to the road nearest the fire's edge — unless holding a threatened town
     const th = fireThreat(w, fe);
     if (done === 0 && th.dist > 6) {
@@ -550,6 +583,12 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
       if (crewCell(w, c) !== c.home) goHome(w, c);
     }
   }
+}
+
+/** Relative effort for an engine to knock down one burning cell: quick in grass, slow in timber. */
+function attackEffort(w: World, i: number): number {
+  const f = cellFuel(w, i, lineFuel);
+  return 0.35 + 0.65 * (1 - f.grassShare);
 }
 
 /** Relative effort to cut one cell of line: ~0.45 in cured grass, 1 in litter, up to ~1.9 in heavy brush or slash. */

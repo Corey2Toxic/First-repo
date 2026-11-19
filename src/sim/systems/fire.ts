@@ -14,7 +14,7 @@ import { FIRE, INFRA, SUBSTEPS_PER_DAY, ZONE } from '../types.ts';
 import type { FireCause, FireEvent, FireResponse } from '../types.ts';
 import { cellFuel } from './fuels.ts';
 import type { CellFuel } from './fuels.ts';
-import { diurnal } from './climate.ts';
+import { diurnal, droughtSeverity } from './climate.ts';
 import { loseStructure } from './towns.ts';
 import type { World } from '../world.ts';
 
@@ -97,7 +97,7 @@ export function igniteCell(w: World, i: number, fe: FireEvent, I: number, crown:
   L.fphase[i] = 0;
   L.crown[i] = crown ? 1 : 0;
   const f = cellFuel(w, i, tmpFuel);
-  const heavyAvail = 0.25 + 0.5 * smoothstep(0.25, 0.9, w.climate.droughtIndex);
+  const heavyAvail = 0.25 + 0.5 * droughtSeverity(w.climate.droughtIndex);
   L.ftime[i] = Math.min(48, 3 + L.litter[i] * 0.25 + f.heavy * heavyAvail + (crown ? 3 : 0));
   w.burning.push(i);
   fe.area++;
@@ -159,6 +159,21 @@ export function releaseOrphanFireCells(w: World): number {
   return n;
 }
 
+/**
+ * Natural and human ignitions happen at a random moment inside the afternoon step, not at its start
+ * (v1.0 gave every new fire a full three hours of spread in its first step). Offsets live only
+ * between dailyIgnitions and the fireSubstep of the same tick, so they never need saving.
+ */
+const pendingStart = new WeakMap<World, Map<number, number>>();
+export function setIgnitionOffset(w: World, cell: number, hours: number): void {
+  let m = pendingStart.get(w);
+  if (!m) {
+    m = new Map();
+    pendingStart.set(w, m);
+  }
+  m.set(cell, hours);
+}
+
 export function startFire(w: World, i: number, cause: FireCause, projectId = -1, smolder = false): FireEvent | null {
   const L = w.L;
   if (!isBurnable(w, i) || L.town[i] > 0) return null;
@@ -214,6 +229,20 @@ export interface FireStepHooks {
   onEnd?: (fe: FireEvent) => void;
 }
 
+/**
+ * Time for fire to cross from one cell into a neighbour: Erlang(k) with the given mean.
+ * With exponential times (k = 1, v1.0) first-passage over many competing paths made the simulated
+ * front run up to ~3.7x faster than the rate formula in light wind and ~1.2x in strong wind, so the
+ * model's rates were not physical rates. A shape of 4 keeps the stochastic roughness that hides the
+ * grid's octagonal bias while the front advances close to the specified rate of spread.
+ */
+export const TRAVEL_SHAPE = 4;
+function travelTime(r: { next(): number }, mean: number): number {
+  let p = 1;
+  for (let k = 0; k < TRAVEL_SHAPE; k++) p *= 1 - r.next();
+  return (-Math.log(p) * mean) / TRAVEL_SHAPE;
+}
+
 // Event queue for within-step spread (stochastic minimum travel time).
 const evHeap = new MinHeap(4096);
 let evTarget = new Int32Array(4096);
@@ -250,31 +279,114 @@ interface StepCtx {
   spread: number;
 }
 
+// ---------------------------------------------------------------- surface rate of spread
+/*
+ * Surface spread (v1.1). v1.0 tied the base rate to a smoothstep of fine-fuel LOAD (up to 6 t/ha),
+ * so light, fast cured grass (≤ 2.6 t/ha) ran at a few metres per hour — slower than closed fir
+ * litter and 1–2 orders of magnitude below observed grass fires, while crown fire ran at realistic
+ * speeds (audit: grass 40 m/h at 6 m/s wind; dense fir out-ran grass 3.6–6.9×).
+ *
+ * Rate now depends on fuel TYPE (fineness and bed structure), as in the fire-behaviour literature:
+ *  - cured grass: CSIRO grassland head-fire model (Cheney, Gould & Catchpole 1998), open 10 m wind;
+ *  - shrub: Rothermel-type response to mid-flame wind, fitted to fuel model 5 (Anderson 1982);
+ *  - litter: same form, fitted between fuel models 8 (short-needle, compact) and 9 (long-needle pine);
+ * weighted by each component's share of the fine fuel; load only matters through continuity
+ * (sparse fuel does not carry). Mid-flame wind = 10 m wind × a wind adjustment factor that falls
+ * from 0.4 in the open to 0.12 under a closed canopy.
+ *
+ * KE_* are explicit effective-rate factors for heterogeneity a 1-ha cell cannot resolve (rock,
+ * bare patches, green swales, trails, partly cured grass, broken litter). They are calibration
+ * choices, documented with their sensitivity in docs/FIRE_MODEL.md. KE_GRASS = 0.2 scales the CSIRO
+ * model (calibrated on continuous pasture) to sparse mountain bunchgrass, comparable to Scott &
+ * Burgan's GR1–GR2 dry-climate grass models (~0.5–1.6 km/h at a 6–7 mph mid-flame wind).
+ *
+ * Direction: the head rate is distributed around an ellipse whose length-to-breadth ratio grows with
+ * wind (Alexander 1985 for forest fuels; Cheney & Sullivan for grass): R(θ) = R_head (1−e)/(1−e cosθ).
+ * Crown-fire rates (already realistic in v1.0) are unchanged.
+ */
+export const KE_GRASS = 0.2;
+export const KE_SHRUB = 0.5;
+export const KE_LITTER = 0.6;
+/**
+ * v1.0's crown-rate formula was tuned under exponential travel times, whose first-passage speed-up
+ * (~1.9x for crown runs) is gone with Erlang(4) times; this restores the same observed crown-fire
+ * front speeds (fire lab: ~1–2 km/h at 12–15 m/s), which the audit found realistic.
+ */
+export const CROWN_SCALE = 2.2;
+
+/** CSIRO grassland head-fire rate (km/h), fully cured, before moisture; u10 = open 10 m wind in km/h. */
+export function grassHeadRateKmh(u10: number): number {
+  return u10 < 5 ? 0.054 + 0.269 * u10 : 1.4 + 0.838 * Math.pow(u10 - 5, 0.844);
+}
+
+/** Length-to-breadth ratio of a wind-driven fire (u10 in km/h), blended by the grass share of the fuel. */
+export function lengthToBreadth(u10: number, grassShare: number): number {
+  const forest = 1 + 8.729 * Math.pow(1 - Math.exp(-0.03 * u10), 2.155);
+  const grass = u10 < 5 ? 1 : 1.1 * Math.pow(u10, 0.464);
+  return Math.min(8, Math.max(1, forest + (grass - forest) * grassShare));
+}
+
+/** Wind adjustment factor: 10 m open wind → mid-flame wind, from open ground to closed canopy. */
+export function windAdjustment(canopyCover: number): number {
+  return 0.4 - 0.28 * Math.min(1, canopyCover);
+}
+
+/**
+ * Dry, flat head-fire rate of spread (m/h) in cell n for a 10 m wind of `u10` m/s, before moisture
+ * damping, slope and the diurnal cycle. `f` must hold cellFuel(w, n).
+ */
+export function surfaceHeadRate(w: World, n: number, f: CellFuel, u10: number): number {
+  const L = w.L;
+  if (f.fine < 0.3) return 0;
+  const can = L.pine[n] + L.fir[n] + L.aspen[n] * 0.6;
+  const waf = windAdjustment(can);
+  const midMph = u10 * waf * 2.237;
+  const windTerm = Math.pow(midMph, 1.4);
+  // grass under trees feels the reduced wind too (timber–grass understory burns slower than open grass)
+  const grassU = u10 * (waf / 0.4) * 3.6;
+  const rGrass = 1000 * grassHeadRateKmh(grassU) * KE_GRASS;
+  const rShrub = 40 * (1 + 0.85 * windTerm) * KE_SHRUB;
+  // long-needle pine litter is fluffy and fast; short fir/spruce needles pack tight; aspen leaf litter is slow
+  const conifer = L.pine[n] + L.fir[n];
+  const pineFrac = conifer > 0.02 ? L.pine[n] / conifer : 0.5;
+  const leafy = can > 0.02 ? (L.aspen[n] * 0.6) / can : 0;
+  const r0Litter = (6 + 18 * pineFrac) * (1 - 0.5 * leafy);
+  const rLitter = r0Litter * (1 + 0.55 * windTerm) * KE_LITTER;
+  const shrubFine = L.shrub[n] * 2.4 * (1 - 0.45 * f.green);
+  const sShare = Math.min(1 - f.grassShare, shrubFine / f.fine);
+  const lShare = Math.max(0, 1 - f.grassShare - sShare);
+  const continuity = smoothstep(0.3, 2.0, f.fine);
+  return (f.grassShare * rGrass + sShare * rShrub + lShare * rLitter) * continuity;
+}
+
 /** Rate of spread (cells/hour) from burning cell b into neighbour n (direction d). */
 function spreadRate(ctx: StepCtx, b: number, n: number, d: number, vigor: number, crownSrc: boolean): number {
   const w = ctx.w;
   const L = w.L;
   const f = tmpFuel;
   cellFuel(w, n, f);
-  if (f.fine < 0.5) return 0;
+  if (f.fine < 0.3) return 0;
   const fm = Math.max(0.02, L.fm[n] + ctx.fmAdd + f.green * (0.06 + 0.06 * f.grassShare));
   // cured grass has a low moisture of extinction; litter and duff a higher one
   const mx = 0.15 + 0.13 * (1 - f.grassShare);
   const damp = moistureDamping(fm / mx);
+  if (damp <= 0 && !crownSrc) return 0;
   const dist = DIST8[d];
-  const canopyCov = L.pine[n] + L.fir[n] + L.aspen[n] * 0.6;
-  const windMid = ctx.windEff * (1 - 0.55 * Math.min(1, canopyCov));
   const cosT = (DX8[d] * ctx.wdx + DY8[d] * ctx.wdy) / dist;
-  const wf = Math.exp(0.22 * windMid * cosT);
   const tanPhi = (L.elev[n] - L.elev[b]) / (dist * 100);
   const sf = tanPhi > 0 ? Math.exp(3.2 * Math.min(tanPhi, 0.8)) : Math.exp(1.2 * Math.max(tanPhi, -0.8));
-  // base rates (cells/hour = 100 m/h) are deliberately below free-burning values to stand in
-  // for sub-cell fuel discontinuities (rocks, trails, moist draws) the grid cannot resolve
-  const R0 = (0.024 + 0.17 * f.grassShare + 0.03 * L.shrub[n]) * smoothstep(0.5, 6, f.fine);
-  let R = R0 * damp * wf * sf * ctx.spread;
+  // elliptical distribution of the head rate around the wind direction
+  const LB = lengthToBreadth(ctx.windEff * 3.6, f.grassShare);
+  const e = Math.sqrt(1 - 1 / (LB * LB));
+  const dir = (1 - e) / (1 - e * cosT);
+  // m/h → cells/h
+  let R = (surfaceHeadRate(w, n, f, ctx.windEff) / 100) * damp * dir * sf * ctx.spread;
   if (crownSrc && f.canopy > 0.3) {
+    const canopyCov = L.pine[n] + L.fir[n] + L.aspen[n] * 0.6;
+    const windMid = ctx.windEff * (1 - 0.55 * Math.min(1, canopyCov));
+    const wf = Math.exp(0.22 * windMid * cosT);
     const crownDamp = clamp01(1 - fm / 0.2) * (1 - 0.55 * f.green * (1 - f.grassShare));
-    const Rc = (0.1 + 0.12 * ctx.windEff) * crownDamp * f.canopy * Math.pow(Math.max(wf, 0.05), 0.6) * Math.pow(sf, 0.7);
+    const Rc = CROWN_SCALE * (0.1 + 0.12 * ctx.windEff) * crownDamp * f.canopy * Math.pow(Math.max(wf, 0.05), 0.6) * Math.pow(sf, 0.7);
     R = Math.max(R, Rc * (1 - 0.5 * L.fline[n]));
   } else {
     R *= 1 - L.fline[n];
@@ -323,7 +435,7 @@ function scheduleFrom(ctx: StepCtx, b: number, t0: number, vigor: number): void 
     if (isStructure) continue; // houses spread to houses and by embers
     const R = spreadRate(ctx, b, n, d, vigor, crownSrc);
     if (R <= 0) continue;
-    const tau = r.exponential(DIST8[d] / R);
+    const tau = travelTime(r, DIST8[d] / R);
     if (tau < remaining) pushEvent(t0 + tau, n, b, 0);
   }
   // ember spotting from intense fire
@@ -369,6 +481,7 @@ export function fireSubstep(w: World, hooks: FireStepHooks = {}): void {
 
   // deterministic order
   w.burning.sort((a, b) => a - b);
+  const starts = pendingStart.get(w);
   const prior = w.burning.slice();
   evHeap.clear();
   evCount = 0;
@@ -392,8 +505,9 @@ export function fireSubstep(w: World, hooks: FireStepHooks = {}): void {
         vigor = 1;
       }
     }
-    scheduleFrom(ctx, b, 0, vigor);
+    scheduleFrom(ctx, b, starts?.get(b) ?? 0, vigor);
   }
+  starts?.clear();
 
   // 2. process ignition events in arrival-time order; new fires spread on within the step
   let guard = 0;
@@ -455,7 +569,7 @@ export function fireSubstep(w: World, hooks: FireStepHooks = {}): void {
 
   // 3. smoke, and burn-down of cells that were already burning at the start of the step
   const burnedOut: number[] = [];
-  const floor = 0.06 + 0.07 * smoothstep(0.3, 0.9, w.climate.droughtIndex);
+  const floor = 0.06 + 0.07 * droughtSeverity(w.climate.droughtIndex);
   for (const b of prior) {
     if (L.fire[b] !== FIRE.BURNING) continue;
     if (!fireById.has(L.fid[b])) {
@@ -805,7 +919,10 @@ export function dailyIgnitions(w: World): FireEvent[] {
       if (r.next() < p) {
         const smolder = r.next() < 0.3;
         const fe = startFire(w, i, 'lightning', -1, smolder);
-        if (fe) started.push(fe);
+        if (fe) {
+          started.push(fe);
+          setIgnitionOffset(w, i, r.range(0, HOURS));
+        }
       }
     }
   }
@@ -823,7 +940,10 @@ export function dailyIgnitions(w: World): FireEvent[] {
       const p = clamp01((0.17 - L.fm[i]) / 0.09) * smoothstep(1, 5, f.fine);
       if (r.next() < p) {
         const fe = startFire(w, i, 'human');
-        if (fe) started.push(fe);
+        if (fe) {
+          started.push(fe);
+          setIgnitionOffset(w, i, r.range(0, HOURS));
+        }
       }
     }
   }

@@ -8,9 +8,10 @@
  * convective storms with (sometimes dry) lightning, and multi-day dry
  * downslope wind events in late summer and autumn — the valley's fire weather.
  */
-import { clamp, clamp01 } from '../grid.ts';
+import { clamp, clamp01, smoothstep } from '../grid.ts';
 import { MEAN_T_REF, SEASON_AMP } from '../env.ts';
 import type { World } from '../world.ts';
+import type { ClimateState } from '../types.ts';
 
 /** Climatological wet-day probability by day of year (0 = first day of spring). */
 function wetProb(doy: number): number {
@@ -69,8 +70,12 @@ export function generateWeather(w: World): void {
   // Temperature: seasonal cycle + yearly anomaly + AR(1) daily anomaly.
   c.tempAR = 0.75 * c.tempAR + r.normal(0, 2.1);
   const base = seasonalTemp(doy) + c.yearTemp;
-  // Precipitation occurrence with persistence.
-  let pw = wetProb(doy) * clamp(0.6 + 0.4 * c.yearWet, 0.5, 1.3);
+  // Precipitation occurrence with persistence. Wet years have more wet days as well as wetter ones;
+  // the Custom "precipitation" setting (config.dryness) scales amounts only, so 70–130 % on the
+  // slider means 70–130 % of the valley's precipitation (v1.0 also scaled the number of wet days:
+  // 64–148 %, D20).
+  const natural = c.yearWet / Math.max(0.05, w.config.dryness);
+  let pw = wetProb(doy) * clamp(0.6 + 0.4 * natural, 0.5, 1.3);
   if (wx.precip > 0.5) pw = Math.min(0.75, pw * 1.6);
   else pw *= 0.85;
   const wet = r.next() < pw;
@@ -85,12 +90,12 @@ export function generateWeather(w: World): void {
   let strikes = 0;
   if (storm) {
     strikes = r.poisson(6 * (1 + Math.max(0, c.yearTemp) * 0.2));
-    dry = r.next() < 0.25 + 0.45 * c.droughtIndex;
+    dry = r.next() < 0.15 + 0.65 * droughtSeverity(c.droughtIndex);
     precip = dry ? r.range(0, 1.5) : Math.max(precip, r.range(3, 16));
   }
   // Downslope wind events: multi-day, dry, strong, blowing toward the outlet.
   if (c.windEventDays > 0) c.windEventDays--;
-  else if (!wet && r.next() < windEventProb(doy) * (0.6 + 0.8 * c.droughtIndex)) c.windEventDays = r.intRange(1, 3);
+  else if (!wet && r.next() < windEventProb(doy) * (0.6 + 0.8 * droughtSeverity(c.droughtIndex))) c.windEventDays = r.intRange(1, 3);
   const windEvent = c.windEventDays > 0;
   if (windEvent) precip = 0;
 
@@ -127,15 +132,55 @@ export function generateWeather(w: World): void {
   wx.strikes = strikes;
   wx.dryLightning = storm && dry;
   wx.windEvent = windEvent;
-  if (wx.tmin < c.winterMin && season >= 2) c.winterMin = wx.tmin - 6; // valley-floor coldest night proxy
+  // coldest night of the winter: valley-floor minimum with cold-air pooling (−6 °C below the daily
+  // minimum). v1.0 compared the raw minimum with the already-offset record, so the record only moved
+  // when a night was 6 °C colder than it: winters read ~2 °C milder and the beetle survival class was
+  // wrong in ~40 % of winters (D10)
+  if (season >= 2 && wx.tmin - 6 < c.winterMin) c.winterMin = wx.tmin - 6;
   if (doy === 0) c.winterMin = Math.min(c.winterMin, -8);
 
-  // Drought index (KBDI-like): dries with heat, recovers with rain.
-  const dry1 = Math.max(0, temp + 2) * 0.0016 * (1 + 0.6 * (1 - rh));
-  c.droughtIndex = clamp01(c.droughtIndex + dry1 - precip * 0.0045);
+  // Drought index: the Keetch–Byram drought index (KBDI, 1968) scaled to 0..1 (KBDI/800). Drying is
+  // proportional to the remaining deficit room and grows with the day's maximum temperature and the
+  // site's mean annual rainfall; each wet spell's first 5 mm is intercepted, the rest refills the
+  // deficit. v1.0's index saturated at 1.0 every summer, even in wet years (73 of 90 days), so it
+  // could not tell droughts from normal summers (D9). Typical summer peaks now: ~0.3 wet, ~0.45
+  // normal, 0.6+ in drought years.
+  c.droughtIndex = kbdiStep(c, wx.tmax, precip, MEAN_ANNUAL_PRECIP_MM * w.config.dryness);
   // smoke dispersion: calm, cold, humid days trap smoke in the valley
   wx.dispersion = clamp01(0.2 + windSpeed / 9 + (season === 1 ? 0.15 : 0) - (season === 3 ? 0.2 : 0));
   w.counters.yearPrecip += precip;
+}
+
+/** Mean annual precipitation at the reference elevation, mm (sum of monthPrecip). */
+export const MEAN_ANNUAL_PRECIP_MM = 544;
+
+/**
+ * Drought severity 0..1 from the drought index: ~0 after snowmelt, ~0.3 in a normal summer, ~0.6 in
+ * a dry summer and 1 at the deficits of the worst droughts this climate produces. Systems that
+ * respond to drought (dry lightning, heavy-fuel availability, smouldering, danger rating, wind
+ * events, groundwater) use this, so their v1.0 response ranges are kept while normal and drought
+ * years are now told apart (v1.0's index sat at its 1.0 ceiling every summer).
+ */
+export function droughtSeverity(droughtIndex: number): number {
+  return smoothstep(0.05, 0.36, droughtIndex);
+}
+
+/** One day of the Keetch–Byram drought index on a 0..1 scale (KBDI / 800). */
+export function kbdiStep(c: ClimateState, tmaxC: number, precipMm: number, annualMm: number): number {
+  let q = c.droughtIndex;
+  // rain: the first 5 mm (0.2 in) of each wet spell is intercepted
+  if (precipMm > 0) {
+    const before = c.rainSpell ?? 0;
+    const after = before + precipMm;
+    const net = Math.max(0, after - 5) - Math.max(0, before - 5);
+    c.rainSpell = after;
+    q -= (net / 25.4) * (100 / 800);
+  } else c.rainSpell = 0;
+  // evapotranspiration drawdown
+  const tF = tmaxC * 1.8 + 32;
+  const rIn = annualMm / 25.4;
+  const dq = ((1 - q) * Math.max(0, 0.968 * Math.exp(0.0486 * tF) - 8.3)) / (1 + 10.88 * Math.exp(-0.0441 * rIn)) / 1000;
+  return clamp01(q + dq);
 }
 
 /** Diurnal multipliers for a 3-hour sub-step (sub 0 = 00:00-03:00). */
@@ -156,7 +201,7 @@ export function updateDanger(w: World, medianFm: number): void {
   const wx = w.weather;
   const dryness = clamp01((0.28 - medianFm) / 0.22);
   const windF = 0.55 + 0.45 * clamp01(wx.windSpeed / 12);
-  const d = clamp01(Math.pow(dryness, 1.15) * windF * (0.75 + 0.45 * w.climate.droughtIndex));
+  const d = clamp01(Math.pow(dryness, 1.15) * windF * (0.75 + 0.45 * droughtSeverity(w.climate.droughtIndex)));
   wx.danger = d;
   wx.dangerClass = d < 0.15 ? 0 : d < 0.32 ? 1 : d < 0.52 ? 2 : d < 0.72 ? 3 : 4;
 }

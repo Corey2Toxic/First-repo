@@ -7,6 +7,7 @@
 import { clamp, clamp01, smoothstep } from '../grid.ts';
 import { LAPSE, REF_ELEV, precipFactor } from '../env.ts';
 import { phenology } from '../derived.ts';
+import { droughtSeverity } from './climate.ts';
 import type { World } from '../world.ts';
 
 interface StaticCache {
@@ -51,9 +52,14 @@ export function soilCapacity(soil: number): number {
 /** Kept for API compatibility: capacity is computed on the fly from soil depth. */
 export function refreshSoilCapacity(_w: World): void {}
 
-/** Equilibrium moisture content (fraction) from relative humidity (0..1) and °C. */
-export function emc(rh: number, t: number): number {
+/**
+ * Equilibrium moisture content (fraction) from relative humidity (0..1) and air temperature in °C.
+ * Simard's (1968) regressions, as used by NFDRS, are defined in °F: v1.0 passed °C, reading
+ * 0.5–1 percentage point too wet (D19).
+ */
+export function emc(rh: number, tC: number): number {
   const H = rh * 100;
+  const t = tC * 1.8 + 32;
   let e: number;
   if (H < 10) e = 0.03229 + 0.281073 * H - 0.000578 * H * t;
   else if (H < 50) e = 2.22749 + 0.160107 * H - 0.01478 * t;
@@ -72,7 +78,7 @@ export function dailyMoisture(w: World, runoff: Float32Array): void {
   const doy = w.doy;
   const sunBoost = 1 + 0.45 * smoothstep(20, 90, doy) * (1 - smoothstep(150, 200, doy));
   const baseEmc = emc(wx.rh, wx.tmax);
-  const regionalWet = clamp01(0.4 + 0.6 * (1 - w.climate.droughtIndex));
+  const regionalWet = clamp01(0.4 + 0.6 * (1 - droughtSeverity(w.climate.droughtIndex)));
   const N = w.N;
   // hoist layer arrays out of the hot loop
   const water = L.water,
