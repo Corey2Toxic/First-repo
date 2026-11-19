@@ -11,6 +11,7 @@ import { SCENARIOS } from '../../src/sim/scenarios.ts';
 import { startFire } from '../../src/sim/systems/fire.ts';
 import { cellFuel } from '../../src/sim/systems/fuels.ts';
 import { hydrologyDaily } from '../../src/sim/systems/hydrology.ts';
+import { quickflowArray } from '../../src/sim/systems/moisture.ts';
 import { townsYearly } from '../../src/sim/systems/towns.ts';
 import { evaluateLegacy } from '../../src/sim/score.ts';
 import { decodeWorld, encodeWorld } from '../../src/sim/save.ts';
@@ -192,6 +193,7 @@ describe('economy, commands and politics', () => {
     w.weather.precip = 30;
     const runoff = new Float32Array(w.N);
     runoff[i0] = 50;
+    quickflowArray(w)[i0] = 50; // erosion is driven by surface runoff only
     let damaged = -1;
     hydrologyDaily(w, runoff, { onDebrisFlow: (_x: number, _y: number, d: number) => (damaged = d) });
     expect(damaged).toBeGreaterThanOrEqual(1);

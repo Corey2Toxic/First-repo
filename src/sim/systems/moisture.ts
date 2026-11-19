@@ -67,6 +67,21 @@ export function emc(rh: number, tC: number): number {
   return clamp(e / 100, 0.015, 0.35);
 }
 
+/**
+ * Today's surface runoff per cell (infiltration and saturation excess), mm. Erosion is driven by
+ * this alone; v1.0 eroded soil with all runoff, including slow subsurface drainage. Recomputed every
+ * day before hydrology runs, so it never needs saving.
+ */
+const quickflows = new WeakMap<World, Float32Array>();
+export function quickflowArray(w: World): Float32Array {
+  let q = quickflows.get(w);
+  if (!q || q.length !== w.N) {
+    q = new Float32Array(w.N);
+    quickflows.set(w, q);
+  }
+  return q;
+}
+
 export interface DailyWaterTotals {
   runoff: Float32Array; // mm of runoff generated per cell today
 }
@@ -104,12 +119,16 @@ export function dailyMoisture(w: World, runoff: Float32Array): void {
     temp = wx.temp,
     dryAir = wx.rh < 0.3;
   const W = w.W;
+  const quick = quickflowArray(w);
   for (let i = 0; i < N; i++) {
     runoff[i] = 0;
+    quick[i] = 0;
     if (water[i] >= 2) {
       smA[i] = 1;
       fmA[i] = 0.4;
       snowA[i] = 0;
+      // rain on a lake or the reservoir joins its water (v1.0 dropped it)
+      runoff[i] = precip * pFac[i];
       continue;
     }
     const t = temp + tOff[i];
@@ -148,6 +167,7 @@ export function dailyMoisture(w: World, runoff: Float32Array): void {
       }
       sm += inf / cap;
       runoff[i] = ro;
+      quick[i] = ro;
     }
     // evapotranspiration
     if (snow < 5) {

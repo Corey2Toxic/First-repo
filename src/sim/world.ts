@@ -266,6 +266,8 @@ export interface WorldMemory {
   deerK?: number;
   returnedTotal?: number;
   allocTotal?: number;
+  /** reservoir inflow, running mean per day (mm·ha) */
+  resInflowMean?: number;
   /** largest beetle-killed area in one flight month this year (ha) */
   beetleInfested?: number;
   /** once-only notices already given (key → day) */

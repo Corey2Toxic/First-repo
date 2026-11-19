@@ -9,14 +9,26 @@ import { clamp01 } from '../grid.ts';
 import { FIRE, INFRA } from '../types.ts';
 import type { World } from '../world.ts';
 import { loseStructure } from './towns.ts';
+import { quickflowArray } from './moisture.ts';
 
 interface HydroCache {
   order: Int32Array; // upstream → downstream
   inReservoir: Uint8Array;
   reservoirCap: number;
+  outlet: number; // first cell below the dam that is not reservoir (-1 if none)
   meanFlow: Float32Array; // running mean discharge for flood detection
 }
 const caches = new WeakMap<World, HydroCache>();
+
+/** First non-reservoir cell on the dam's downstream path (static terrain, so reloads agree). */
+function damOutlet(w: World, inRes: Uint8Array): number {
+  let cur = w.damCell;
+  for (let k = 0; k < 50 && cur >= 0; k++) {
+    if (!inRes[cur]) return cur;
+    cur = w.L.flowTo[cur];
+  }
+  return -1;
+}
 
 function cache(w: World): HydroCache {
   let c = caches.get(w);
@@ -30,6 +42,7 @@ function cache(w: World): HydroCache {
     order: Int32Array.from(idx),
     inReservoir: inRes,
     reservoirCap: Math.max(1, w.reservoirCells.length) * 5000,
+    outlet: damOutlet(w, inRes),
     meanFlow: new Float32Array(w.N),
   };
   caches.set(w, c);
@@ -41,7 +54,44 @@ export interface HydroHooks {
   onFlood?: (townId: number) => void;
 }
 
+/**
+ * Erosion coefficient (calibration). With the RUSLE-like cover factor below, 0.15 gives chronic
+ * (fire-free) reservoir capacity loss of ~0.2–0.5 %/yr across seeds, the range reported for forested
+ * mountain catchments; burned, water-repellent slopes add pulses on top. See REMEDIATION_REPORT.md.
+ */
+const EROSION_K = 0.15;
 const flow = { a: null as Float32Array | null, s: null as Float32Array | null };
+
+/**
+ * Reservoir water and sediment balance (water in mm·ha). Returns what leaves through the dam: an
+ * environmental release plus any spill, and the sediment the reservoir fails to trap. Trapping
+ * follows Brune's curve (Dendy's fit), falling as silt eats into capacity, instead of v1.0's hard
+ * cap at 85 % (which simply deleted further sediment while turbidity kept climbing).
+ */
+function reservoirBalance(w: World, c: HydroCache, inflow: number, sediment: number): { water: number; sediment: number } {
+  const pop = w.population;
+  const summer = w.season === 1 ? 1.4 : 1;
+  const demand = pop * 0.22 * summer;
+  const evap = w.reservoirCells.length * Math.max(0, w.weather.temp) * 0.25;
+  const cap = c.reservoirCap * (1 - w.reservoirSilt);
+  const m = w.memory;
+  m.resInflowMean = (m.resInflowMean ?? inflow) * (1 - 1 / 360) + inflow / 360;
+  let store = w.reservoirLevel * cap + inflow - demand - evap;
+  if (store < 0) store = 0;
+  // minimum instream flow: the lesser of today's natural inflow and a tenth of the mean, so a
+  // drought is passed through rather than drained from storage
+  const release = Math.min(store, inflow, 0.1 * (m.resInflowMean ?? 0));
+  store -= release;
+  const spill = Math.max(0, store - cap);
+  store -= spill;
+  w.reservoirLevel = cap > 0 ? store / cap : 0;
+  if (w.reservoirLevel < 0.12) w.counters.yearWaterShortDays++;
+  const ratio = cap / Math.max(1, (m.resInflowMean ?? inflow) * 360);
+  const trap = clamp01(ratio / (0.012 + 1.02 * ratio));
+  w.reservoirSilt = Math.min(0.97, w.reservoirSilt + sediment * trap * 0.00002);
+  w.reservoirTurbidity = clamp01(w.reservoirTurbidity * 0.9 + sediment * trap * 0.002);
+  return { water: release + spill, sediment: sediment * (1 - trap) };
+}
 
 export function hydrologyDaily(w: World, runoff: Float32Array, hooks: HydroHooks = {}): void {
   const L = w.L;
@@ -56,23 +106,40 @@ export function hydrologyDaily(w: World, runoff: Float32Array, hooks: HydroHooks
   q.fill(0);
   sed.fill(0);
   const heavyRain = w.weather.precip > 24;
+  const quick = quickflowArray(w);
   let resInflow = 0,
     resSediment = 0;
   let debris = -1;
+  let balanced = false;
   for (let k = 0; k < N; k++) {
     const i = c.order[k];
+    // everything draining to the reservoir lies upstream of the river below the dam, so its water
+    // balance is complete here: what it cannot hold spills on down the river (v1.0 deleted it)
+    if (i === c.outlet && !balanced) {
+      const out = reservoirBalance(w, c, resInflow, resSediment);
+      q[i] += out.water;
+      sed[i] += out.sediment;
+      balanced = true;
+    }
     // local runoff + erosion
     const ro = runoff[i];
     let qi = q[i] + ro;
     let si = sed[i];
-    if (ro > 0.5 && !L.water[i]) {
-      const cover = clamp01(L.grass[i] + L.shrub[i] + L.aspen[i] + L.pine[i] + L.fir[i] + L.litter[i] / 20);
-      const erod = ro * (0.02 + L.slope[i]) * Math.pow(1 - 0.85 * cover, 2) * (1 + 3 * L.hydro[i]) * 0.004;
-      if (erod > 0) {
-        L.soil[i] = Math.max(0.03, L.soil[i] - erod * 0.02);
-        si += erod;
+    const qf = quick[i];
+    if (qf > 0.5 && !L.water[i]) {
+      // RUSLE-like cover factor: ground cover (plants, litter and duff) protects the soil. v1.0's
+      // factor bottomed out at 0.0225 under full forest — 5-20x RUSLE's ~0.001-0.005 — so intact
+      // forest supplied most of the sediment and fire scars barely stood out. v1.0 also eroded with
+      // all runoff, including slow subsurface drainage; only surface runoff (quickflow) does now
+      const ground = clamp01(L.grass[i] + L.shrub[i] + 0.5 * (L.aspen[i] + L.pine[i] + L.fir[i]) + L.litter[i] / 8);
+      // erosive load: surface runoff × slope × cover × water repellency
+      const load = qf * (0.02 + L.slope[i]) * Math.pow(1 - 0.97 * ground, 2) * (1 + 3 * L.hydro[i]);
+      if (load > 0) {
+        L.soil[i] = Math.max(0.03, L.soil[i] - load * 0.00008); // v1.0's soil loss per unit load
+        si += load * EROSION_K;
       }
-      if (heavyRain && L.hydro[i] > 0.45 && L.slope[i] > 0.22 && erod > 0.08 && debris < 0) debris = i;
+      // same trigger as v1.0 (erod > 0.08 at its 0.004 coefficient)
+      if (heavyRain && L.hydro[i] > 0.45 && L.slope[i] > 0.22 && load > 20 && debris < 0) debris = i;
     }
     // ponds and lakes trap sediment and buffer flow
     if (L.pond[i] > 0.3) {
@@ -100,20 +167,7 @@ export function hydrologyDaily(w: World, runoff: Float32Array, hooks: HydroHooks
   // beaver ponds release stored water slowly: keep late-summer streams alive
   for (const col of w.colonies) if (col.active) L.stream[col.cell] += 2 * col.dam;
 
-  // reservoir water balance (units: mm·ha)
-  const pop = w.population;
-  const summer = w.season === 1 ? 1.4 : 1;
-  const demand = pop * 0.22 * summer;
-  const evap = w.reservoirCells.length * Math.max(0, w.weather.temp) * 0.25;
-  const cap = c.reservoirCap * (1 - w.reservoirSilt);
-  let store = w.reservoirLevel * cap + resInflow - demand - evap;
-  if (store < 0) store = 0;
-  if (store > cap) store = cap;
-  w.reservoirLevel = cap > 0 ? store / cap : 0;
-  if (w.reservoirLevel < 0.12) w.counters.yearWaterShortDays++;
-  // sediment fills the reservoir and muddies the water
-  w.reservoirSilt = Math.min(0.85, w.reservoirSilt + resSediment * 0.00002);
-  w.reservoirTurbidity = clamp01(w.reservoirTurbidity * 0.9 + resSediment * 0.002);
+  if (!balanced) reservoirBalance(w, c, resInflow, resSediment);
 
   // debris flow: a pulse of mud down a burned, water-repellent hillside
   if (debris >= 0) {
@@ -132,7 +186,7 @@ export function hydrologyDaily(w: World, runoff: Float32Array, hooks: HydroHooks
       cur = L.flowTo[cur];
     }
     w.counters.debrisFlows++;
-    w.reservoirSilt = Math.min(0.85, w.reservoirSilt + 0.01);
+    w.reservoirSilt = Math.min(0.97, w.reservoirSilt + 0.01);
     if (damaged > 0) w.dirty.infra++;
     if (hooks.onDebrisFlow) hooks.onDebrisFlow(x, y, damaged);
   }
