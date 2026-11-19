@@ -10,7 +10,9 @@
 | **Vite / Vitest / Playwright** | Fast builds, Node-environment unit tests, headless-Chromium end-to-end tests with SwiftShader WebGL. |
 | No assets | All art (terrain, trees, houses, fire, smoke, icons) and audio are generated procedurally. |
 
-Production bundle: ~308 kB JS (≈112 kB gzip); `dist-single/fireweed.html` inlines everything (~315 kB).
+Production bundle: ~309 kB JS (≈112 kB gzip); `dist-single/fireweed.html` inlines everything (~317 kB).
+`dist-single/fireweed-hosted.html` is the same page without the document wrapper, for hosts that
+supply their own (it sets `FIREWEED_NO_DOWNLOADS`, which hides the file-export button).
 
 ## Layers
 

@@ -1,6 +1,7 @@
 /**
- * Save storage in the browser: gzip (CompressionStream) + IndexedDB, with a
- * localStorage fallback for the slot index, and file export/import.
+ * Save storage in the browser: gzip (CompressionStream) + IndexedDB, and file
+ * export/import. Every IndexedDB access can fail (private windows, blocked site
+ * data); failures reject and the UI reports them or carries on without saves.
  */
 import { decodeWorld, describeSave, encodeWorld } from '../sim/save.ts';
 import type { World } from '../sim/world.ts';
@@ -132,7 +133,11 @@ export async function importFile(file: File): Promise<World> {
 }
 
 export function hasStorage(): boolean {
-  return typeof indexedDB !== 'undefined';
+  try {
+    return typeof indexedDB !== 'undefined';
+  } catch {
+    return false; // the accessor itself throws where site data is blocked
+  }
 }
 
 /**
