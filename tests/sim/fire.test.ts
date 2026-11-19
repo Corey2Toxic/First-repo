@@ -324,4 +324,35 @@ describe('fire behaviour', () => {
     expect(reached).toBeGreaterThan(6);
     expect(crossed).toBeLessThan(reached / 2); // v1.0/v1.1-early: a road only halved the rate
   });
+  it('a head fire runs about as far whatever the wind direction is relative to the grid', () => {
+    // v1.1's first elliptical spread on 8 neighbours ran 4x slower with the wind between them
+    const head = (ang: number) => {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) {
+        const w = flatWorld(150, 150, { grass: 0.85, litter: 0.4, fm: 0.05 });
+        w.rng.fire = new Rng(`aniso-${ang}-${k}`);
+        w.weather.windSpeed = 9;
+        w.weather.windDir = ang;
+        const fe = startFire(w, 15 * w.W + 15, 'human')!;
+        burn(w, 1);
+        let best = 0;
+        for (let i = 0; i < w.N; i++) {
+          if (w.L.fid[i] !== fe.id) continue;
+          const x = (i % w.W) - 15,
+            y = ((i / w.W) | 0) - 15;
+          best = Math.max(best, x * Math.cos(ang) + y * Math.sin(ang));
+        }
+        sum += best;
+      }
+      return sum / 4;
+    };
+    const axis = head(0),
+      off = head(Math.PI / 8),
+      diag = head(Math.PI / 4);
+    expect(axis).toBeGreaterThan(20);
+    for (const r of [off / axis, diag / axis]) {
+      expect(r).toBeGreaterThan(0.85);
+      expect(r).toBeLessThan(1.25);
+    }
+  });
 });

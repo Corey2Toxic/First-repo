@@ -9,7 +9,7 @@
  * ladder-fuel continuity exceeds a threshold in dry canopies. Intense fires
  * loft embers downwind that can jump rivers, roads and control lines.
  */
-import { DIST8, DX8, DY8, MinHeap, clamp01, smoothstep } from '../grid.ts';
+import { DX8, DY8, MinHeap, clamp01, smoothstep } from '../grid.ts';
 import { FIRE, INFRA, SUBSTEPS_PER_DAY, ZONE } from '../types.ts';
 import type { FireCause, FireEvent, FireResponse } from '../types.ts';
 import { cellFuel } from './fuels.ts';
@@ -233,10 +233,12 @@ export interface FireStepHooks {
  * Time for fire to cross from one cell into a neighbour: Erlang(k) with the given mean.
  * With exponential times (k = 1, v1.0) first-passage over many competing paths made the simulated
  * front run up to ~3.7x faster than the rate formula in light wind and ~1.2x in strong wind, so the
- * model's rates were not physical rates. A shape of 4 keeps the stochastic roughness that hides the
- * grid's octagonal bias while the front advances close to the specified rate of spread.
+ * model's rates were not physical rates. A shape of 8, with the 16-direction stencil, keeps enough
+ * roughness to hide the stencil's polygonal bias while the front advances close to the specified
+ * rate whatever the wind direction (with shape 4 the extra fast paths near the diagonals ran ~25 %
+ * ahead).
  */
-export const TRAVEL_SHAPE = 4;
+export const TRAVEL_SHAPE = 8;
 function travelTime(r: { next(): number }, mean: number): number {
   let p = 1;
   for (let k = 0; k < TRAVEL_SHAPE; k++) p *= 1 - r.next();
@@ -309,8 +311,9 @@ export const KE_SHRUB = 0.5;
 export const KE_LITTER = 0.6;
 /**
  * v1.0's crown-rate formula was tuned under exponential travel times, whose first-passage speed-up
- * (~1.9x for crown runs) is gone with Erlang(4) times; this restores the same observed crown-fire
- * front speeds (fire lab: ~1–2 km/h at 12–15 m/s), which the audit found realistic.
+ * (~1.9x for crown runs) is gone with Erlang times, and its rate is now the head of a wind ellipse
+ * (flanks much slower); this scale keeps crown head-fire speeds in the observed range (fire lab:
+ * ~0.25 km/h at 6 m/s to ~1.6 km/h at 15 m/s; Rothermel 1991, Stocks et al. 2004).
  */
 export const CROWN_SCALE = 3.0;
 
@@ -359,7 +362,35 @@ export function surfaceHeadRate(w: World, n: number, f: CellFuel, u10: number): 
   return (f.grassShare * rGrass + sShare * rShrub + lShare * rLitter) * continuity;
 }
 
-/** Rate of spread (cells/hour) from burning cell b into neighbour n (direction d). */
+/**
+ * The spread stencil: the 8 neighbours plus the 8 knight moves, 16 directions at most 26.6° apart.
+ * With only 8 directions (45° apart) a narrow wind ellipse pointing between two of them was barely
+ * reached: with the wind at 22.5° a grass head fire advanced at ~25 % of its on-axis speed (auditor's
+ * anisotropy harness). Knight moves cross two cells, which must both let fire through.
+ */
+const SX = [1, 1, 0, -1, -1, -1, 0, 1, 2, 1, -1, -2, -2, -1, 1, 2] as const;
+const SY = [0, 1, 1, 1, 0, -1, -1, -1, 1, 2, 2, 1, -1, -2, -2, -1] as const;
+const SD = [1, Math.SQRT2, 1, Math.SQRT2, 1, Math.SQRT2, 1, Math.SQRT2, ...Array(8).fill(Math.sqrt(5))] as readonly number[];
+/**
+ * Angular resolution: each direction takes the ellipse's rate at its angle from the wind less half
+ * the gap to its neighbouring directions, so a head fire pointing between two stencil directions
+ * still runs at ≥ cos(13.3°) = 97 % of its rate along the wind. The price is a fire shape somewhat
+ * wider than the ideal ellipse in those orientations (like a wind meandering by a few degrees).
+ * Auditor's anisotropy harness (head distance along the wind, 0° / 22.5° / 45°): grass 1 : 1.13 :
+ * 1.12, crown fire 1 : 1.11 : 1.07 (v1.0: within 9–20 %; v1.1's first 8-direction ellipse 1 : 0.25 : 1.02).
+ */
+/** Half the angular gap to the neighbouring stencil directions: axes ±26.6°, diagonals and knights 18.4°. */
+const HALF_GAP = [...Array(16)].map((_, d) => (d < 8 && d % 2 === 0 ? Math.atan2(1, 2) : Math.PI / 4 - Math.atan2(1, 2)) / 2);
+const COS_GAP = HALF_GAP.map(Math.cos),
+  SIN_GAP = HALF_GAP.map(Math.sin);
+/** cos(max(0, θ − half gap of direction d)) for an angle θ given by its cosine. */
+function cosResolved(cosT: number, d: number): number {
+  if (cosT >= COS_GAP[d]) return 1;
+  const sinT = Math.sqrt(Math.max(0, 1 - cosT * cosT));
+  return cosT * COS_GAP[d] + sinT * SIN_GAP[d];
+}
+
+/** Rate of spread (cells/hour) from burning cell b into cell n, stencil direction d. */
 function spreadRate(ctx: StepCtx, b: number, n: number, d: number, vigor: number, crownSrc: boolean): number {
   const w = ctx.w;
   const L = w.L;
@@ -371,8 +402,8 @@ function spreadRate(ctx: StepCtx, b: number, n: number, d: number, vigor: number
   const mx = 0.15 + 0.13 * (1 - f.grassShare);
   const damp = moistureDamping(fm / mx);
   if (damp <= 0 && !crownSrc) return 0;
-  const dist = DIST8[d];
-  const cosT = (DX8[d] * ctx.wdx + DY8[d] * ctx.wdy) / dist;
+  const dist = SD[d];
+  const cosT = cosResolved((SX[d] * ctx.wdx + SY[d] * ctx.wdy) / dist, d);
   const tanPhi = (L.elev[n] - L.elev[b]) / (dist * 100);
   const sf = tanPhi > 0 ? Math.exp(3.2 * Math.min(tanPhi, 0.8)) : Math.exp(1.2 * Math.max(tanPhi, -0.8));
   // elliptical distribution of the head rate around the wind direction
@@ -406,6 +437,18 @@ function spreadRate(ctx: StepCtx, b: number, n: number, d: number, vigor: number
   return R * vigor;
 }
 
+/** Can a knight-move path cross cell c? Only burning or burnable, unbroken ground lets fire through. */
+const passFuel: CellFuel = { fine: 0, grassShare: 0, ladder: 0, canopy: 0, heavy: 0, green: 0 };
+function passable(w: World, c: number): boolean {
+  const L = w.L;
+  if (L.water[c] >= 2 || L.pond[c] > 0.35 || L.town[c] !== 0) return false;
+  if (L.infra[c] & (INFRA.ROAD | INFRA.FUELBREAK) || L.fline[c] > 0.5 || L.retard[c] > 0.5 || L.wet[c] > 0.5) return false;
+  if (L.fire[c] === FIRE.BURNING) return true;
+  if (L.fire[c] !== FIRE.NONE) return false;
+  cellFuel(w, c, passFuel);
+  return passFuel.fine >= 0.3;
+}
+
 /** Queue spread, structure and ember events out of cell b, which started burning at time t0. */
 function scheduleFrom(ctx: StepCtx, b: number, t0: number, vigor: number): void {
   const w = ctx.w;
@@ -419,13 +462,25 @@ function scheduleFrom(ctx: StepCtx, b: number, t0: number, vigor: number): void 
   const crownSrc = L.crown[b] === 1;
   const remaining = HOURS - t0;
   if (remaining <= 0) return;
-  for (let d = 0; d < 8; d++) {
-    const nx = bx + DX8[d],
-      ny = by + DY8[d];
+  for (let d = 0; d < 16; d++) {
+    const nx = bx + SX[d],
+      ny = by + SY[d];
     if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
     const n = ny * W + nx;
     if (L.fire[n] !== FIRE.NONE) continue;
     if (L.water[n] >= 2 || L.pond[n] > 0.35) continue;
+    if (d >= 8) {
+      // knight move: the two cells the straight path crosses must carry fire too, and fire reaches a
+      // road or fuel break only from next door (so a front makes as many attempts on it as before)
+      if (isStructure || L.town[n] > 0 || L.infra[n] & (INFRA.ROAD | INFRA.FUELBREAK)) continue;
+      // e.g. (2, 1) crosses (1, 0) and (1, 1); (1, 2) crosses (0, 1) and (1, 1)
+      const longX = Math.abs(SX[d]) === 2;
+      const hx = longX ? SX[d] / 2 : 0,
+        hy = longX ? 0 : SY[d] / 2;
+      const c1 = (by + hy) * W + bx + hx,
+        c2 = (by + (longX ? SY[d] : hy)) * W + bx + (longX ? hx : SX[d]);
+      if (!passable(w, c1) || !passable(w, c2)) continue;
+    }
     if (L.town[n] > 0) {
       // radiant heat and embers from neighbouring fire onto houses
       const town = w.towns[L.town[n] - 1];
@@ -444,14 +499,14 @@ function scheduleFrom(ctx: StepCtx, b: number, t0: number, vigor: number): void 
     // a road or fuel break stops a surface fire unless it is pushed across by wind or intensity
     // (v1.0 only halved the rate, which stops nothing once grass runs at realistic speed)
     if (!crownSrc && L.infra[n] & (INFRA.ROAD | INFRA.FUELBREAK)) {
-      const cosW = (DX8[d] * ctx.wdx + DY8[d] * ctx.wdy) / DIST8[d];
+      const cosW = (SX[d] * ctx.wdx + SY[d] * ctx.wdy) / SD[d];
       // (per attempt; a long front makes many attempts, so a light-wind fire crosses only rarely
       // while a wind-driven head fire still gets across)
       const push = smoothstep(3, 12, ctx.windEff * Math.max(0, cosW)) * 0.5 + smoothstep(0.3, 0.9, L.fint[b]) * 0.4;
       const breach = clamp01(0.004 + push) * (L.infra[n] & INFRA.FUELBREAK ? 0.6 : 1);
       if (r.next() >= breach) continue;
     }
-    const tau = travelTime(r, DIST8[d] / R);
+    const tau = travelTime(r, SD[d] / R);
     if (tau < remaining) pushEvent(t0 + tau, n, b, 0);
   }
   // ember spotting from intense fire
