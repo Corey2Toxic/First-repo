@@ -61,7 +61,10 @@ class Backdrop {
     if (c.width !== Math.round(c.clientWidth * Math.min(2, window.devicePixelRatio || 1))) this.resize();
     const k = (t - this.t0) / 1000;
     const w = this.world;
-    const base = Math.min(this.cam.viewW / w.W, this.cam.viewH / w.H);
+    // fill the screen in any orientation (portrait phones would otherwise letterbox)
+    const sx = this.cam.viewW / w.W,
+      sy = this.cam.viewH / w.H;
+    const base = Math.max(Math.min(sx, sy), Math.max(sx, sy) / 1.35);
     this.cam.scale = this.cam.tscale = base * (1.35 + 0.12 * Math.sin(k * 0.05));
     this.cam.cx = this.cam.tcx = w.W / 2 + Math.sin(k * 0.03) * w.W * 0.12;
     this.cam.cy = this.cam.tcy = w.H / 2 + Math.cos(k * 0.025) * w.H * 0.08;

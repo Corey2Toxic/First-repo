@@ -4,19 +4,37 @@
  * accepts player actions, saves and loads — with no console errors.
  *
  *   npm run build && npm run test:e2e
+ *   npm run test:e2e -- dist-single/fireweed-hosted.html   (the hosted variant)
  */
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { chromium } from 'playwright';
 
-const root = process.argv[2] ?? 'dist';
-if (!existsSync(join(root, 'index.html'))) {
-  console.error(`No build found in ${root}/ — run "npm run build" first.`);
+// A build directory (default dist/), or one HTML file such as
+// dist-single/fireweed-hosted.html, which is served inside a minimal document
+// like the one a host wraps around page content.
+const target = process.argv[2] ?? 'dist';
+const single = target.endsWith('.html');
+const root = single ? '' : target;
+if (!existsSync(single ? target : join(root, 'index.html'))) {
+  console.error(`No build found at ${target} — run "npm run build" first.`);
   process.exit(2);
+}
+let page0 = single ? readFileSync(target, 'utf8') : '';
+if (single && !/<html[\s>]/i.test(page0)) {
+  page0 =
+    '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">' +
+    '<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}</style>' +
+    `</head><body>${page0}</body></html>`;
 }
 const MIME: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const server = createServer((req, res) => {
+  if (single) {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(page0);
+    return;
+  }
   const url = decodeURIComponent((req.url ?? '/').split('?')[0]);
   let p = join(root, url === '/' ? 'index.html' : url);
   if (!existsSync(p) || statSync(p).isDirectory()) p = join(root, 'index.html');

@@ -66,6 +66,21 @@ log; the milestone table reflects the current state.
   fire; contextual deputy tips that re-validate their conditions; council review modal; legacy screen.
 - Bugs caught by screenshots and the e2e test: unclickable panels (CSS specificity), legend overlapping
   lens buttons, a tutorial step that could dead-end.
+- Phone pass (scripts/phone-check.ts at 400 × 860): the wrapped top bar hid behind the lens bar, the
+  deputy card covered the dock and overflowed when a drawer opened. The top bar's measured height now
+  positions everything below it; lenses and dock are swipeable rows; the deputy sits at the top on
+  phones. Touch gained pinch zoom; narrow screens open closer in.
+
+### Hosted single-file build
+- `dist-single/fireweed-hosted.html` is the page content without a document wrapper, for hosts that
+  supply their own and block downloads (the export button hides; IndexedDB saves still work). The e2e
+  run passes against it inside a stand-in wrapper.
+
+### Prescribed burns over new homes
+- Strategy bots showed the steward losing homes to burns that never escaped. Tracing each fire
+  (`FW_FIRES=1`) found towns growing into burn units while they waited for a weather window; the burn
+  then consumed the new houses as "planned". Units are now re-checked when lit, towns do not grow into
+  pending units, and a regression test covers it. The burn tool now advises thinning beside homes.
 
 ## Known limitations
 
@@ -79,7 +94,9 @@ log; the milestone table reflects the current state.
 - **Towns** are aggregates (population, homes), not individual agents.
 - **Hydrology** is daily and one-directional (no channel routing delays, no groundwater store beyond
   soil moisture); floods are not simulated separately from debris flows.
-- **Mobile/touch** works only roughly; the game is designed for mouse and keyboard.
+- **Phones** get a compact layout, pinch zoom and swipeable bars, checked only in headless Chromium at
+  400 × 860. The game is designed for a larger screen with mouse and keyboard; on a phone the panels
+  cover much of the map and painting with a finger is imprecise.
 - No localisation; English only.
 
 ## Ideas for future work

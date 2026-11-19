@@ -41,6 +41,8 @@ Requirements: Node 20+ (developed on Node 22), a browser with WebGL 2 (Chrome, E
 npm test             # Vitest: simulation unit + integration tests (≈5 min; most of it is
                      # every scenario simulated for 30 years)
 npm run build && npm run test:e2e   # headless Chromium plays the real game through its UI
+npm run test:e2e -- dist-single/fireweed-hosted.html   # the same run against the hosted variant
+node scripts/phone-check.ts         # phone-size (400 × 860) layout check with screenshots
 ```
 
 Headless tools used for balancing and QA:
@@ -81,6 +83,7 @@ node scripts/dump-map.ts <seed> <scenario> <outdir>              # PNG maps of a
 | Tools | `Q` inspect · `Z` zones · `T` thin · `B` burn · `F` fireline · `X` air tanker |
 | Brush | `[` / `]` size · right-click or `Esc` cancels · `Shift`-drag clears zones |
 | Lenses | `L` cycles |
+| Touch | drag to pan or paint · two-finger pinch to zoom · the lens bar and panel dock scroll sideways on phones |
 
 ### Scenarios
 

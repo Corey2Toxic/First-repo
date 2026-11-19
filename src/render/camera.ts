@@ -31,7 +31,10 @@ export class Camera {
   fit(): void {
     this.tcx = this.cx = this.gridW / 2;
     this.tcy = this.cy = this.gridH / 2;
-    this.tscale = this.scale = Math.min(this.viewW / this.gridW, this.viewH / this.gridH) * 0.98;
+    const contain = Math.min(this.viewW / this.gridW, this.viewH / this.gridH);
+    const cover = Math.max(this.viewW / this.gridW, this.viewH / this.gridH);
+    // whole valley on wide screens; on narrow (phone) screens start closer in
+    this.tscale = this.scale = this.viewW < 700 ? Math.min(cover, contain * 2.2) : contain * 0.98;
   }
 
   screenToWorld(sx: number, sy: number): [number, number] {
