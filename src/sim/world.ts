@@ -244,6 +244,11 @@ export interface WorldMemory {
   wolfReleases?: number;
   pendingCampground?: boolean;
   millClosedYear?: number;
+  /** This year so far: visitors who wanted to come, and those turned away for want of room. */
+  visitDemand?: number;
+  turnedAway?: number;
+  /** Share of last year's would-be visitors who were turned away. */
+  turnedAwayShare?: number;
   trustSum?: number;
   trustYears?: number;
   startPopulation?: number;

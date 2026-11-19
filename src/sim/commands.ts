@@ -14,6 +14,7 @@ import { layRoad, roadCost } from './gen/settle.ts';
 import { beaverSiteScore } from './gen/wildlife.ts';
 import { NameBank } from './gen/names.ts';
 import { handleReviewCommand } from './systems/council.ts';
+import { buildCampground, campSiteProblem } from './systems/economy.ts';
 import type { World } from './world.ts';
 
 export type Command =
@@ -301,26 +302,10 @@ function apply(w: World, cmd: Command): CommandResult {
         w.dirty.infra++;
         return { ok: true, msg: 'Lookout tower built.', cost: COST.tower };
       }
-      // campground needs road access
-      let nearRoad = false;
-      for (let dy = -4; dy <= 4 && !nearRoad; dy++)
-        for (let dx = -4; dx <= 4; dx++) {
-          const x = (i % w.W) + dx,
-            y = ((i / w.W) | 0) + dy;
-          if (w.inside(x, y) && L.infra[y * w.W + x] & INFRA.ROAD) {
-            nearRoad = true;
-            break;
-          }
-        }
-      if (!nearRoad) return fail('Campgrounds need a road within 400 m.');
-      if (L.zone[i] === ZONE.WILDERNESS) return fail('No developed campgrounds in wilderness.');
-      // one campground per site: v1.0 let ten be stacked on one hectare for ten times the visitors
-      if (w.camps.some((c) => Math.hypot((c % w.W) - (i % w.W), ((c / w.W) | 0) - ((i / w.W) | 0)) < 4))
-        return fail('Too close to an existing campground.');
-      L.infra[i] |= INFRA.CAMP;
-      w.camps.push(i);
-      w.spend('Infrastructure', COST.camp);
-      w.dirty.infra++;
+      // campgrounds: a gentle, dry, roaded site outside towns and wilderness, apart from the others
+      const problem = campSiteProblem(w, i);
+      if (problem) return fail(problem);
+      buildCampground(w, i);
       return { ok: true, msg: 'Campground built.', cost: COST.camp };
     }
     case 'road': {
