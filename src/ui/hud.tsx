@@ -158,7 +158,7 @@ const ZONE_DESC: Record<number, string> = {
   [ZONE.RECREATION]: 'Draws visitors and fees — and their campfires.',
   [ZONE.TIMBER]: 'The mill harvests mature stands here each autumn. Jobs and revenue; slash and young thickets follow.',
   [ZONE.RANGE]: 'Cattle graze the grass, reducing fine fuel. Wolves and cattle do not mix.',
-  [ZONE.BUFFER]: 'Wildland–urban interface. Fires here are always fought; treatments here raise the town’s firewise rating.',
+  [ZONE.BUFFER]: 'Wildland–urban interface within 1 km of homes. Fires that reach it are always fought, and crews go there first. Thinned or burned buffer raises the town’s firewise rating and is kept treated each year ($45/ha). New homes are not built in it unless there is no other room.',
   [ZONE.NONE]: 'No special management. Fires are suppressed by default.',
 };
 export const ZONE_COLORS = ['#888', '#5abf73', '#59b3f2', '#f2a640', '#ebe066', '#f26666'];

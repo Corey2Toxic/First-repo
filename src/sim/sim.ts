@@ -19,7 +19,7 @@ import { closeEconomyYear, dailyEconomy } from './systems/economy.ts';
 import { deerCount, wildlifeDaily, wolfCount } from './systems/wildlife.ts';
 import { beetleSummary, beetleWinterKill, beetlesMonthly } from './systems/beetles.ts';
 import { hydrologyDaily } from './systems/hydrology.ts';
-import { townsDaily, townsYearly, updateFirewise } from './systems/towns.ts';
+import { maintainBuffers, townsDaily, townsYearly, updateFirewise } from './systems/towns.ts';
 import { applyAllocation, beginReview, councilMonthly } from './systems/council.ts';
 import { makeEventHooks, monthlyDiscoveries } from './events.ts';
 import { discover } from './notes.ts';
@@ -202,6 +202,7 @@ export class Simulation {
     closeEconomyYear(w);
     townsYearly(w);
     maintainFuelbreaks(w);
+    maintainBuffers(w);
     if (w.memory.millClosedYear === w.year) w.record('people', 'The sawmill shut its doors for want of logs.', 3);
     w.memory.lastYearSmoke = c.yearSmokeDays;
     w.memory.trustSum = (w.memory.trustSum ?? 0) + w.trust;

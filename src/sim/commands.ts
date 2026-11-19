@@ -201,6 +201,7 @@ function apply(w: World, cmd: Command): CommandResult {
       const fe = fireById(w, cmd.fireId);
       if (!fe || !fe.active) return fail('That fire is out.');
       if (fe.cause === 'prescribed') return fail('Prescribed burns are managed by their crews.');
+      if (fe.inBuffer && cmd.response === 'monitor') return fail('Fires in a Community Buffer are always fought.');
       fe.response = cmd.response;
       if (cmd.response === 'monitor') for (const c of w.crews) if (c.task?.fireId === fe.id && !c.manual) c.task = null;
       return { ok: true, msg: `${fe.name}: response set to ${cmd.response}.` };

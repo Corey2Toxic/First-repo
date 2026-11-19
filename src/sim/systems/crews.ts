@@ -330,7 +330,8 @@ export function autoDispatch(w: World): void {
   const scored = fires
     .map((fe) => {
       const th = fireThreat(w, fe);
-      return { fe, th, score: (fe.response === 'suppress' ? 1 : 0.5) * (40 / (5 + th.dist)) + Math.sqrt(fe.area) * 0.2 };
+      // fires in a Community Buffer come first, whatever their size
+      return { fe, th, score: (fe.response === 'suppress' ? 1 : 0.5) * (40 / (5 + th.dist)) + Math.sqrt(fe.area) * 0.2 + (fe.inBuffer ? 25 : 0) };
     })
     .sort((a, b) => b.score - a.score);
   const assigned = (fe: FireEvent, kind?: Crew['kind']) =>
@@ -342,9 +343,9 @@ export function autoDispatch(w: World): void {
     if (c.manual) continue;
     if (c.fatigue > 0.95) continue;
     for (const { fe, th } of scored) {
-      if (c.kind === 'engine' && th.dist > 16) continue; // engines defend homes and roadsides
+      if (c.kind === 'engine' && th.dist > 16 && !fe.inBuffer) continue; // engines defend homes and roadsides
       if (fe.response === 'contain' && c.kind === 'hand' && th.dist > 20) continue;
-      const want = c.kind === 'hand' ? Math.min(4, 1 + Math.floor(Math.sqrt(fe.area) / 8)) : c.kind === 'engine' ? 2 : 1;
+      const want = (c.kind === 'hand' ? Math.min(4, 1 + Math.floor(Math.sqrt(fe.area) / 8)) : c.kind === 'engine' ? 2 : 1) + (fe.inBuffer && c.kind !== 'heli' ? 1 : 0);
       if (assigned(fe, c.kind) >= want) continue;
       // projects yield to fires
       const pr = c.task?.kind === 'project' ? w.projects.find((p) => p.id === c.task!.projectId) : undefined;

@@ -82,6 +82,8 @@ export interface FireEvent {
   /** Notable flags for narrative */
   threatenedTowns: number[];
   spotFires: number;
+  /** Has burned into a Community Buffer (always fought, dispatched first). */
+  inBuffer?: boolean;
 }
 
 export type CrewKind = 'hand' | 'engine' | 'heli';

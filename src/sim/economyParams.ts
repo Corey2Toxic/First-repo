@@ -8,6 +8,7 @@ export const COST = {
   plant: 760, // per ha planting
   fuelbreak: 1800, // per ha shaded fuel break
   fuelbreakUpkeep: 60, // per ha per year
+  bufferUpkeep: 45, // per ha per year: keeping treated Community Buffer near homes treated
   road: 2600, // per cell (100 m)
   roadUpkeep: 35, // per cell per year
   tower: 90_000,

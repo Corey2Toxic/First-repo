@@ -65,6 +65,7 @@ function nearestStructureDist(w: World, x: number, y: number): number {
 export function defaultResponse(w: World, i: number, cause: FireCause): FireResponse {
   if (cause === 'prescribed' || cause === 'pile') return 'contain';
   const z = w.L.zone[i];
+  if (z === ZONE.BUFFER) return 'suppress';
   const d = nearestStructureDist(w, i % w.W, (i / w.W) | 0);
   if (z === ZONE.WILDERNESS && d > 16) return 'monitor';
   return 'suppress';
@@ -102,6 +103,21 @@ export function igniteCell(w: World, i: number, fe: FireEvent, I: number, crown:
   if (crown) fe.crownArea++;
   if (I > fe.maxIntensity) fe.maxIntensity = I;
   extendFireBounds(w, fe, i);
+  if (L.zone[i] === ZONE.BUFFER && !fe.inBuffer) enterBuffer(w, fe, i);
+}
+
+/**
+ * A wildfire that burns into a Community Buffer is always fought: a "monitor" or "contain" order is
+ * upgraded to full suppression and the dispatcher sends crews there first (see crews.autoDispatch).
+ * Prescribed burns inside a buffer stay with their crews.
+ */
+function enterBuffer(w: World, fe: FireEvent, i: number): void {
+  fe.inBuffer = true;
+  if (fe.cause === 'prescribed' || fe.cause === 'pile') return;
+  if (fe.response !== 'suppress') {
+    fe.response = 'suppress';
+    if (fe.detected) w.notify(`${fe.name} has reached the community buffer — crews ordered to suppress it.`, 'warn', i % w.W, (i / w.W) | 0, fe.id);
+  }
 }
 
 /**
@@ -876,7 +892,7 @@ export function detectFires(w: World, hooks: FireStepHooks): void {
       fe.detected = true;
       fe.detectedDay = w.day;
       fe.detectedBy = by || 'a hiker';
-      fe.response = defaultResponse(w, oi, fe.cause);
+      fe.response = fe.inBuffer && fe.cause !== 'prescribed' && fe.cause !== 'pile' ? 'suppress' : defaultResponse(w, oi, fe.cause);
       if (hooks.onDetect) hooks.onDetect(fe);
     }
   }

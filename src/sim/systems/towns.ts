@@ -5,6 +5,7 @@
 import { DX8, DY8, clamp01 } from '../grid.ts';
 import { FIRE, INFRA, ZONE } from '../types.ts';
 import type { Town } from '../types.ts';
+import { COST } from '../economyParams.ts';
 import { hazardIndex } from './fuels.ts';
 import type { World } from '../world.ts';
 
@@ -38,42 +39,108 @@ export function townsDaily(w: World): void {
   }
 }
 
-/** Fraction of the town's surroundings with low fuel hazard (treated or naturally light). */
-function surroundingsSafety(w: World, t: Town): number {
+/** Cells within `BUFFER_REACH` (1 km) of a town's houses: the ring a Community Buffer protects. */
+export const BUFFER_REACH = 10;
+
+/**
+ * Chebyshev distance (cells) from each cell near the town to its nearest house of that town, up to
+ * BUFFER_REACH; -1 elsewhere. A pure function of the town layer, recomputed when needed.
+ */
+function townRing(w: World, t: Town): Map<number, number> {
   const L = w.L;
   const tid = t.id + 1;
-  let n = 0,
-    safe = 0;
-  const r = 5 + Math.sqrt(t.structures) * 0.8;
-  for (let y = Math.max(0, Math.floor(t.y - r - 5)); y <= Math.min(w.H - 1, Math.ceil(t.y + r + 5)); y++)
-    for (let x = Math.max(0, Math.floor(t.x - r - 5)); x <= Math.min(w.W - 1, Math.ceil(t.x + r + 5)); x++) {
+  const out = new Map<number, number>();
+  const r = 6 + Math.sqrt(t.structures) * 1.2 + BUFFER_REACH;
+  let frontier: number[] = [];
+  for (let y = Math.max(0, Math.floor(t.y - r)); y <= Math.min(w.H - 1, Math.ceil(t.y + r)); y++)
+    for (let x = Math.max(0, Math.floor(t.x - r)); x <= Math.min(w.W - 1, Math.ceil(t.x + r)); x++) {
       const i = y * w.W + x;
-      if (L.town[i] || L.water[i]) continue;
-      // within 4 cells of a structure of this town?
-      let near = false;
-      for (let d = 0; d < 8 && !near; d++)
-        for (let k = 1; k <= 4; k++) {
-          const xx = x + DX8[d] * k,
-            yy = y + DY8[d] * k;
-          if (w.inside(xx, yy) && L.town[yy * w.W + xx] === tid) {
-            near = true;
-            break;
-          }
-        }
-      if (!near) continue;
-      n++;
-      const treated = w.yearF - L.lastTreat[i] < 8 || w.yearF - L.lastBurn[i] < 6;
-      if (treated || hazardIndex(w, i) < 0.28) safe++;
+      if (L.town[i] === tid) {
+        out.set(i, 0);
+        frontier.push(i);
+      }
     }
-  return n ? safe / n : 0.5;
+  for (let d = 1; d <= BUFFER_REACH && frontier.length; d++) {
+    const next: number[] = [];
+    for (const c of frontier) {
+      const cx = c % w.W,
+        cy = (c / w.W) | 0;
+      for (let k = 0; k < 8; k++) {
+        const nx = cx + DX8[k],
+          ny = cy + DY8[k];
+        if (!w.inside(nx, ny)) continue;
+        const n = ny * w.W + nx;
+        if (out.has(n)) continue;
+        out.set(n, d);
+        next.push(n);
+      }
+    }
+    frontier = next;
+  }
+  return out;
+}
+
+const isTreated = (w: World, i: number) => w.yearF - w.L.lastTreat[i] < 8 || w.yearF - w.L.lastBurn[i] < 6;
+
+/**
+ * Town readiness from its surroundings:
+ *  - `near`: share of land within 400 m of houses that is treated or naturally light (as in v1.0);
+ *  - `buffer`: how much of the 1 km ring is a treated Community Buffer (zoned, and treated or kept
+ *    light). A designated, maintained buffer is what the tutorial and the zone tooltip promise:
+ *    v1.0 never read the zone at all.
+ */
+export function surroundingsSafety(w: World, t: Town): { near: number; buffer: number } {
+  const L = w.L;
+  let n = 0,
+    safe = 0,
+    ring = 0,
+    buf = 0;
+  for (const [i, d] of townRing(w, t)) {
+    if (d === 0 || L.town[i] || L.water[i]) continue;
+    const light = isTreated(w, i) || hazardIndex(w, i) < 0.28;
+    if (d <= 4) {
+      n++;
+      if (light) safe++;
+    }
+    ring++;
+    if (L.zone[i] === ZONE.BUFFER && light) buf++;
+  }
+  return { near: n ? safe / n : 0.5, buffer: ring ? clamp01(buf / (0.35 * ring)) : 0 };
 }
 
 export function updateFirewise(w: World): void {
   const code = w.policies.buildingCode === 'firewise' ? 1 : 0;
   for (const t of w.towns) {
     const s = surroundingsSafety(w, t);
-    t.firewise = clamp01(0.1 + 0.32 * code + 0.5 * s);
+    t.firewise = clamp01(0.1 + 0.32 * code + 0.45 * s.near + 0.15 * s.buffer);
   }
+}
+
+/**
+ * Year end: treated Community Buffer within 1 km of houses is kept treated — brush cleared, litter
+ * raked, young fir cut back — at a per-hectare cost. Returns hectares maintained.
+ */
+export function maintainBuffers(w: World): number {
+  const L = w.L;
+  let n = 0;
+  const seen = new Set<number>();
+  for (const t of w.towns)
+    for (const [i, d] of townRing(w, t)) {
+      if (d === 0 || seen.has(i) || L.zone[i] !== ZONE.BUFFER || L.town[i] || L.water[i]) continue;
+      seen.add(i);
+      if (!isTreated(w, i)) continue;
+      L.litter[i] *= 0.7;
+      L.shrub[i] *= 0.7;
+      L.slash[i] *= 0.5;
+      if (L.ageF[i] < 30) L.fir[i] *= 0.8;
+      L.lastTreat[i] = w.yearF;
+      n++;
+    }
+  if (n) {
+    w.spend('Fuel treatments', n * COST.bufferUpkeep);
+    w.dirty.veg++;
+  }
+  return n;
 }
 
 /** Yearly town growth, rebuilding and expansion into the forest edge. */
@@ -143,7 +210,8 @@ function expandTown(w: World, t: Town, count: number): void {
       if (w.policies.growthBoundary && dist > boundaryR) continue;
       // people like to build among the trees and near roads: the WUI grows
       const can = L.aspen[i] + L.pine[i] + L.fir[i];
-      const score = -dist * 0.15 + can * 1.2 + (L.infra[i] & INFRA.ROAD ? 0.8 : 0) - L.slope[i] * 6 + w.rng.human.next() * 0.6;
+      // a designated Community Buffer is kept as defensible space: new homes go elsewhere first
+      const score = -dist * 0.15 + can * 1.2 + (L.infra[i] & INFRA.ROAD ? 0.8 : 0) - L.slope[i] * 6 + w.rng.human.next() * 0.6 - (L.zone[i] === ZONE.BUFFER ? 2 : 0);
       cands.push([score, i]);
     }
   cands.sort((a, b) => b[0] - a[0] || a[1] - b[1]);

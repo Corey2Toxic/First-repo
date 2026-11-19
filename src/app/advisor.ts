@@ -74,7 +74,7 @@ export class Advisor {
       {
         id: 'buffer',
         title: 'Zone a Community Buffer',
-        body: `Pick the Zones tool (Z), choose "Community buffer", and paint a ring of forest around ${town.name}. Fires starting in buffers are always fought hard, and treated buffers make towns safer (their firewise rating rises).`,
+        body: `Pick the Zones tool (Z), choose "Community buffer", and paint a ring of forest around ${town.name}. Fires that reach a buffer are always fought, and crews go there first. Once you thin or burn it, the buffer is kept treated each year and the town's firewise rating rises.`,
         highlight: 'tool-zone',
         focus: [town.x, town.y],
         done: () => this.zoned,
