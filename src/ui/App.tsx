@@ -23,6 +23,20 @@ function renderer(): MapRenderer {
   return sharedRenderer;
 }
 
+/**
+ * The valley behind the title menus. The backdrop only draws it (nothing ticks it), so it is
+ * generated once and reused: going back to the title costs a texture upload, not a new valley.
+ */
+let titleValley: World | null = null;
+function titleWorld(): World {
+  if (!titleValley) {
+    const w = generateWorld(makeConfig('firstseason', 'fireweed-title', 'small'));
+    w.day = 200; // autumn colours on the title
+    titleValley = w;
+  }
+  return titleValley;
+}
+
 /** A slowly drifting view of a generated valley behind the menus. */
 class Backdrop {
   private raf = 0;
@@ -107,9 +121,7 @@ export function App() {
   const showBackdrop = () => {
     backdrop.current?.stop();
     backdrop.current = null;
-    const w = generateWorld(makeConfig('firstseason', 'fireweed-title', 'small'));
-    w.day = 200; // autumn colours on the title
-    backdrop.current = new Backdrop(w);
+    backdrop.current = new Backdrop(titleWorld());
   };
 
   /**
@@ -285,6 +297,8 @@ function GameScreen({ s, onLoad, onQuit, onNew }: { s: GameSession; onLoad: (w: 
   const [, setTick] = useState(0);
   const [panel, setPanel] = useState<PanelId | null>(null);
   useEffect(() => s.subscribe(() => setTick((x) => x + 1)), [s]);
+  // a valley loaded from the menu opens on the map, not behind the menu it was loaded from
+  useEffect(() => setPanel(null), [s]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && panel) setPanel(null);

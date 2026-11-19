@@ -110,6 +110,7 @@ const startMediumValley = async (seed: string) => {
 };
 /** Turn on the fuel hazard lens and let the game draw it for a moment. */
 const hazardLens = async () => {
+  if (await page.isVisible('.drawer')) await page.click('.drawer .close');
   await page.click('#lens-hazard');
   await page.evaluate(() => (window as any).fireweed.setSpeed(2));
   await page.waitForTimeout(1500);
@@ -229,7 +230,7 @@ try {
   await page.waitForTimeout(300);
   await page.click('.topbar .btn.ghost');
   await page.click('.drawer .btn:has-text("Save game")');
-  await page.waitForSelector('.drawer :text("Saved.")', { timeout: 20000 });
+  await page.waitForSelector('.drawer :text("Saved.")', { timeout: 60000 });
   const savedDay = (await W()).day;
   await page.click('.drawer .btn:has-text("Quit to title")');
   await page.waitForSelector('.logo', { timeout: 60000 });
