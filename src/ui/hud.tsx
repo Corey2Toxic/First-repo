@@ -2,7 +2,7 @@
  * Heads-up display: top bar, tool palette and flyouts, lenses and legend,
  * notification feed, toasts, panel dock and the advisor card.
  */
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GameSession, ToolId } from '../app/session.ts';
 import { SPEED_NAMES } from '../app/session.ts';
 import { Icons } from './icons.tsx';
@@ -21,8 +21,22 @@ export function TopBar({ s, openPanel }: { s: GameSession; openPanel: (p: PanelI
   const trust = w.trust;
   const fires = w.fires.filter((f) => f.active && f.detected && f.cause !== 'prescribed').length;
   const arrowDeg = (wx.windDir * 180) / Math.PI;
+  const bar = useRef<HTMLDivElement>(null);
+  // The bar wraps onto several rows on narrow screens; publish where it ends so
+  // the panels below it (tools, lenses, drawers, flyouts, toasts) start there.
+  useEffect(() => {
+    const el = bar.current;
+    const host = el?.parentElement;
+    if (!el || !host || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => host.style.setProperty('--hud-top', `${el.offsetTop + el.offsetHeight + 12}px`));
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      host.style.removeProperty('--hud-top');
+    };
+  }, []);
   return (
-    <div class="topbar panel">
+    <div class="topbar panel" ref={bar}>
       <div style={{ minWidth: '150px' }}>
         <div class="valley">{w.valleyName}</div>
         <div class="date num">
@@ -217,7 +231,8 @@ export function ToolFlyout({ s }: { s: GameSession }) {
         <div>
           <p class="dim" style={{ margin: 0 }}>
             Crews ring the unit with control line and light it when the weather is mild, fuels are damp and wind is light — usually spring or autumn. Cheap and
-            ecologically rich; produces smoke, and occasionally escapes.
+            ecologically rich; produces smoke, and occasionally escapes. A unit beside houses can escape straight into town: thin the first few
+            hundred metres around homes and burn beyond them.
           </p>
           <div class="kv" style={{ marginTop: '8px' }}>
             <span class="k">Cost</span>
@@ -452,7 +467,7 @@ export function AdvisorCardView({ s, docked }: { s: GameSession; docked?: boolea
   if (!card) return null;
   const isTip = !a.card;
   return (
-    <div class={'advisor panel' + (isTip ? ' tip' : '')} style={docked ? { left: '72px', transform: 'none', bottom: '62px', width: '420px', minWidth: '0' } : undefined}>
+    <div class={'advisor panel' + (isTip ? ' tip' : '') + (docked ? ' docked' : '')}>
       <div class="row">
         <span class="who">{isTip ? 'Deputy’s note' : 'Your deputy'}</span>
         <span class="grow" />

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { flatWorld } from '../helpers.ts';
-import { applyFireEffects, fireSubstep, moistureDamping, startFire } from '../../src/sim/systems/fire.ts';
+import { applyFireEffects, fireSubstep, moistureDamping, projectContains, startFire } from '../../src/sim/systems/fire.ts';
+import { createProject, igniteProjectBurn } from '../../src/sim/systems/projects.ts';
 import { FIRE } from '../../src/sim/types.ts';
 import type { World } from '../../src/sim/world.ts';
 import { Rng } from '../../src/sim/rng.ts';
@@ -114,5 +115,24 @@ describe('fire behaviour', () => {
     }
     expect(fe.active).toBe(false);
     for (let i = 0; i < w.N; i++) expect(w.L.fire[i]).toBe(FIRE.NONE);
+  });
+
+  it('homes built inside a burn unit while it waited are cut out of it before lighting', () => {
+    const w = flatWorld(40, 30, { fm: 0.12 });
+    const unit: number[] = [];
+    for (let y = 10; y < 16; y++) for (let x = 10; x < 18; x++) unit.push(y * w.W + x);
+    const pr = createProject(w, 'burn', unit)!;
+    expect(pr.unit.length).toBe(unit.length);
+    const house = 12 * w.W + 13;
+    expect(projectContains(w, pr.id, house)).toBe(true); // membership is cached from here on
+    w.L.town[house] = 1; // the town grew into the unit before the weather window came
+    expect(igniteProjectBurn(w, pr)).not.toBeNull();
+    expect(pr.unit).not.toContain(house);
+    expect(projectContains(w, pr.id, house)).toBe(false); // so fire reaching it is an escape
+    // a unit that has been built over entirely is called off
+    const pr2 = createProject(w, 'burn', [20 * w.W + 30, 20 * w.W + 31])!;
+    for (const c of pr2.unit) w.L.town[c] = 1;
+    expect(igniteProjectBurn(w, pr2)).toBeNull();
+    expect(pr2.status).toBe('cancelled');
   });
 });

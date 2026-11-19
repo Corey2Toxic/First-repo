@@ -106,6 +106,9 @@ export class GameSession {
   private lensBuf: Uint8Array;
   private detectedCount = 0;
   private dragging: { button: number; x: number; y: number; moved: boolean; painting: boolean } | null = null;
+  /** Pointers currently down on the map (two fingers = pinch zoom). */
+  private pointers = new Map<number, { x: number; y: number }>();
+  private pinch: { dist: number; mx: number; my: number } | null = null;
   private keys = new Set<string>();
   private mapCanvas: HTMLCanvasElement;
   private overlayCanvas: HTMLCanvasElement;
@@ -359,6 +362,19 @@ export class GameSession {
         y = e.clientY - r.top;
       el.setPointerCapture(e.pointerId);
       this.audio.resume();
+      if (e.isPrimary) this.pointers.clear(); // a new gesture; forget any lost pointer
+      if (e.pointerType !== 'mouse') this.pointers.set(e.pointerId, { x, y });
+      if (this.pointers.size >= 2) {
+        // a second finger turns the gesture into a pinch; drop any stroke the first one began
+        if (this.dragging?.painting) {
+          this.painted.clear();
+          this.path = [];
+          this.pathLabel = '';
+        }
+        this.dragging = null;
+        this.pinch = this.pinchState();
+        return;
+      }
       const painting = e.button === 0 && this.toolPaints();
       this.dragging = { button: e.button, x, y, moved: false, painting };
       if (painting) this.pointerPaint(x, y, e.shiftKey, true);
@@ -375,6 +391,14 @@ export class GameSession {
       const x = e.clientX - r.left,
         y = e.clientY - r.top;
       this.hoverCell = this.cellAt(x, y);
+      if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x, y });
+      if (this.pinch && this.pointers.size >= 2) {
+        const p = this.pinchState();
+        this.cam.zoomAt(p.mx, p.my, p.dist / Math.max(1, this.pinch.dist));
+        this.cam.panPixels(p.mx - this.pinch.mx, p.my - this.pinch.my);
+        this.pinch = p;
+        return;
+      }
       const d = this.dragging;
       if (d) {
         const dx = x - d.x,
@@ -390,10 +414,25 @@ export class GameSession {
         this.previewRoad(this.hoverCell);
       }
     });
+    const endPinch = (e: PointerEvent): boolean => {
+      this.pointers.delete(e.pointerId);
+      if (!this.pinch) return false;
+      if (this.pointers.size < 2) {
+        this.pinch = null;
+        // the finger still down keeps panning, and lifting it is not a click
+        const rest = this.pointers.values().next().value;
+        this.dragging = rest ? { button: 0, x: rest.x, y: rest.y, moved: true, painting: false } : null;
+      }
+      return true;
+    };
+    on(el, 'pointercancel', (e: PointerEvent) => {
+      if (!endPinch(e)) this.dragging = null;
+    });
     on(el, 'pointerup', (e: PointerEvent) => {
       const r = el.getBoundingClientRect();
       const x = e.clientX - r.left,
         y = e.clientY - r.top;
+      if (endPinch(e)) return;
       const d = this.dragging;
       this.dragging = null;
       if (!d) return;
@@ -408,6 +447,11 @@ export class GameSession {
     });
     on(window, 'keydown', (e: KeyboardEvent) => this.keydown(e));
     on(window, 'keyup', (e: KeyboardEvent) => this.keys.delete(e.key.toLowerCase()));
+  }
+
+  private pinchState(): { dist: number; mx: number; my: number } {
+    const [a, b] = Array.from(this.pointers.values());
+    return { dist: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
   }
 
   private toolPaints(): boolean {

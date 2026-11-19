@@ -499,6 +499,10 @@ function checkEscape(w: World, fe: FireEvent, cell: number, hooks: FireStepHooks
 
 // per-world cache of project unit membership (ids restart in every new game)
 const projectSets = new WeakMap<World, Map<number, Set<number>>>();
+/** Call after changing a project's unit so the membership cache follows it. */
+export function forgetProjectUnit(w: World, projectId: number): void {
+  projectSets.get(w)?.delete(projectId);
+}
 export function projectContains(w: World, projectId: number, cell: number): boolean {
   let m = projectSets.get(w);
   if (!m) {

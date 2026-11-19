@@ -70,9 +70,11 @@ function stewardTreat(w: World, kind: 'burn' | 'thin', budget: number): void {
   const busy = new Set<number>();
   for (const p of w.projects) if (p.status !== 'done' && p.status !== 'cancelled') for (const c of p.unit) busy.add(c);
   const cands: Array<[number, number]> = [];
+  // thin the ring around homes; burn beyond it, never right against houses
   const maxD = kind === 'thin' ? 6 : 18;
+  const minD = kind === 'burn' ? 3 : 0;
   for (let i = 0; i < w.N; i++) {
-    if (td[i] > maxD || w.L.water[i] || w.L.town[i] || busy.has(i)) continue;
+    if (td[i] > maxD || td[i] < minD || w.L.water[i] || w.L.town[i] || busy.has(i)) continue;
     if (w.yearF - w.L.lastTreat[i] < 6 || w.yearF - w.L.lastBurn[i] < 4) continue;
     const h = hazardIndex(w, i);
     if (h > 0.3) cands.push([h - td[i] * 0.01, i]);
@@ -83,7 +85,7 @@ function stewardTreat(w: World, kind: 'burn' | 'thin', budget: number): void {
   for (const [, seed] of cands) {
     if (spent > budget) break;
     if (busy.has(seed)) continue;
-    const cells = blob(w, seed, kind === 'burn' ? 45 : 14, (n) => !busy.has(n) && !w.L.water[n] && !w.L.town[n] && hazardIndex(w, n) > 0.22);
+    const cells = blob(w, seed, kind === 'burn' ? 45 : 14, (n) => !busy.has(n) && !w.L.water[n] && !w.L.town[n] && td[n] >= minD && hazardIndex(w, n) > 0.22);
     for (const c of cells) busy.add(c);
     const r = applyCommand(w, { t: 'project', kind, cells });
     if (r.ok) spent += cells.length * per;
@@ -138,6 +140,16 @@ function play(seed: string, strat: Strategy, scen: ScenarioId, years: number) {
     if (w.review.pending) onReview(w);
   }
   if (!w.outcome.ended) w.outcome = evaluateLegacy(w, 'tenure');
+  if (process.env.FW_FIRES) {
+    // FW_FIRES=1: list the fires that mattered (stderr), for balancing
+    for (const f of w.fires) {
+      if (f.structuresLost === 0 && f.area < 1000) continue;
+      const td = townDist(w)[f.originY * w.W + f.originX];
+      console.error(
+        `  y${Math.floor(f.startDay / 360) + 1} d${f.startDay % 360} ${f.name} [${f.cause}, ${f.response}] ${f.area} ha, ${f.structuresLost} homes, origin ${td} cells from town`,
+      );
+    }
+  }
   const v = vegetationSummary(w);
   const burned = w.counters.totalBurned;
   return {

@@ -152,7 +152,7 @@ export const FIELD_NOTES: FieldNote[] = [
     title: 'Escaped burn',
     category: 'People',
     body: 'Sometimes a prescribed burn spots over its control line. An escape is a real fire — and the council will remember who lit it.',
-    tip: 'Burn smaller units, avoid long dry spells, and keep crews on the line until it is out.',
+    tip: 'Burn smaller units, avoid long dry spells, keep crews on the line until it is out, and do not burn right up against houses: thin there instead.',
   },
   {
     id: 'wui',

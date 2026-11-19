@@ -10,7 +10,7 @@ import { FIRE, INFRA, SP, ZONE } from '../types.ts';
 import type { FireEvent, Project, ProjectKind } from '../types.ts';
 import { COST, REVENUE } from '../economyParams.ts';
 import { cellFuel } from './fuels.ts';
-import { startFire, igniteCell, projectContains } from './fire.ts';
+import { startFire, igniteCell, projectContains, forgetProjectUnit } from './fire.ts';
 import type { World } from '../world.ts';
 
 export const PROJECT_NAMES: Record<ProjectKind, string> = {
@@ -244,6 +244,17 @@ export function unitRing(w: World, pr: Project): number[] {
 
 export function igniteProjectBurn(w: World, pr: Project): FireEvent | null {
   const L = w.L;
+  // the unit was checked when it was planned; homes or facilities built since
+  // then are taken out of it (fire reaching them is then an escape)
+  const unit = pr.unit.filter((c) => L.town[c] === 0 && !(L.infra[c] & (INFRA.STATION | INFRA.MILL | INFRA.TOWER | INFRA.CAMP)));
+  if (unit.length < pr.unit.length) {
+    pr.unit = unit;
+    forgetProjectUnit(w, pr.id);
+  }
+  if (unit.length === 0) {
+    pr.status = 'cancelled'; // built over before it could be burned
+    return null;
+  }
   for (const c of unitRing(w, pr)) L.fline[c] = Math.max(L.fline[c], 0.9);
   // light a pattern of ignition points across the unit
   const r = w.rng.fire;

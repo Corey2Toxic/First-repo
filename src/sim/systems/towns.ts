@@ -122,12 +122,15 @@ function expandTown(w: World, t: Town, count: number): void {
   const L = w.L;
   const tid = t.id + 1;
   const boundaryR = 4 + Math.sqrt(t.structures + 20) * 1.1;
+  // nobody builds inside a burn unit that is still waiting for its window
+  const planned = new Set<number>();
+  for (const pr of w.projects) if (pr.kind === 'burn' && pr.status !== 'done' && pr.status !== 'cancelled') for (const c of pr.unit) planned.add(c);
   const cands: Array<[number, number]> = [];
   for (let y = Math.max(1, t.y - 25); y < Math.min(w.H - 1, t.y + 25); y++)
     for (let x = Math.max(1, t.x - 25); x < Math.min(w.W - 1, t.x + 25); x++) {
       const i = y * w.W + x;
       if (L.town[i] || L.water[i] || L.slope[i] > 0.18 || L.flowAcc[i] > 1200 || L.zone[i] === ZONE.WILDERNESS) continue;
-      if (L.fire[i] !== FIRE.NONE) continue;
+      if (L.fire[i] !== FIRE.NONE || planned.has(i)) continue;
       let adj = false;
       for (let d = 0; d < 8; d++) if (L.town[i + DY8[d] * w.W + DX8[d]] === tid) adj = true;
       if (!adj) continue;
