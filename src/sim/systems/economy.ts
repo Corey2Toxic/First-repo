@@ -7,6 +7,7 @@ import { clamp01, smoothstep } from '../grid.ts';
 import { FIRE, INFRA, ZONE } from '../types.ts';
 import { COST, CREW_COST, REVENUE } from '../economyParams.ts';
 import { distanceField } from '../gen/settle.ts';
+import type { LedgerYear } from '../types.ts';
 import type { World } from '../world.ts';
 
 interface EconCache {
@@ -205,10 +206,11 @@ function yearEndRevenue(w: World): void {
   w.earn('Grazing fees', c.rangeCells * (lvl / 0.35) * REVENUE.grazingPerHa);
 }
 
-/** Called at the year boundary: roll the ledger and market. */
-export function closeEconomyYear(w: World): void {
+/** Called at the year boundary: roll the ledger and market. Returns the closed year's ledger. */
+export function closeEconomyYear(w: World): LedgerYear {
   const e = w.economy;
-  e.history.push(e.ledger);
+  const closed = e.ledger;
+  e.history.push(closed);
   if (e.history.length > 80) e.history.shift();
   e.harvestLastYear = e.harvestThisYear;
   e.harvestThisYear = 0;
@@ -218,6 +220,7 @@ export function closeEconomyYear(w: World): void {
   const r = w.rng.human;
   e.timberPrice = Math.max(30, Math.min(110, e.timberPrice * Math.exp(r.normal(0, 0.12)) * 0.9 + 6));
   e.ledger = { year: w.year, income: {}, expense: {} };
+  return closed;
 }
 
 export function ledgerTotals(l: { income: Record<string, number>; expense: Record<string, number> }): { income: number; expense: number } {
