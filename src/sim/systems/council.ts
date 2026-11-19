@@ -7,14 +7,14 @@
 import { clamp, clamp01 } from '../grid.ts';
 import { FACTIONS, FACTION_NAMES, ZONE } from '../types.ts';
 import type { FactionId, Petition, PetitionAction } from '../types.ts';
-import { econCache, ledgerTotals } from './economy.ts';
+import { bestCampSite, buildCampground, campSiteValid, econCache, ledgerTotals } from './economy.ts';
 import { vegetationSummary } from './vegetation.ts';
 import { createProject } from './projects.ts';
 import { hazardIndex } from './fuels.ts';
 import { dredge } from './hydrology.ts';
 import { COST } from '../economyParams.ts';
 import { NameBank } from '../gen/names.ts';
-import { distanceField } from '../gen/settle.ts';
+import { distanceField, timberExpansionCells } from '../gen/settle.ts';
 import { evaluateLegacy } from '../score.ts';
 import type { Command, CommandResult } from '../commands.ts';
 import type { World } from '../world.ts';
@@ -191,19 +191,83 @@ function townBufferCells(w: World, townId: number): number[] {
   return out.slice(0, 40).map((p) => p[1]);
 }
 
+const COMPASS = ['east', 'southeast', 'south', 'southwest', 'west', 'northwest', 'north', 'northeast'];
+
+/** “near Mirror Lake, 2.4 km northeast of Pinecrest”: where a cell is, in words. */
+export function placeName(w: World, i: number): string {
+  const x = (i % w.W) + 0.5,
+    y = ((i / w.W) | 0) + 0.5;
+  let mark = '',
+    md = 8;
+  for (const m of w.landmarks) {
+    if (m.kind === 'town') continue;
+    const d = Math.hypot(m.x - x, m.y - y);
+    if (d < md) {
+      md = d;
+      mark = m.name;
+    }
+  }
+  let town = w.towns[0],
+    td = Infinity;
+  for (const t of w.towns) {
+    const d = Math.hypot(t.x - x, t.y - y);
+    if (d < td) {
+      td = d;
+      town = t;
+    }
+  }
+  if (!town) return mark ? `near ${mark}` : 'in the valley';
+  const dir = COMPASS[Math.round(Math.atan2(y - town.y, x - town.x) / (Math.PI / 4)) & 7];
+  const where = `${(td / 10).toFixed(1)} km ${dir} of ${town.name}`;
+  return mark ? `near ${mark}, ${where}` : where;
+}
+
+/** Share of last year's would-be visitors turned away for want of room above which tourism asks for a campground. */
+export const CAMP_PETITION_SHARE = 0.15;
+
+/** The last harvest ran short because the Timber zone had no more stands ready to cut (not because of the quota). */
+function stockLimited(w: World): boolean {
+  return !!w.memory.harvestStockLimited;
+}
+
+function timberShortfallCells(w: World): number[] {
+  const e = w.economy;
+  return timberExpansionCells(w, Math.max(0, e.millDemand - e.harvestLastYear), econCache(w).roadDist);
+}
+
 const TEMPLATES: PetitionTemplate[] = [
   {
     key: 'raise-harvest',
     faction: 'timber',
-    when: (w) => (w.economy.millOpen && w.policies.harvest !== 'high' && w.economy.harvestLastYear < 0.8 * w.economy.millDemand ? 1 : 0),
-    make: (w) => ({
-      title: 'Keep the mill running',
-      text: `The mill cut only ${Math.round((100 * w.economy.harvestLastYear) / w.economy.millDemand)}% of its log demand last year. Raise the harvest quota or the night shift goes.`,
-      action: { type: 'policy', key: 'harvest', value: w.policies.harvest === 'low' ? 'medium' : 'high' },
-      acceptDelta: 12,
-      declineDelta: -9,
-      sideEffects: [['conservation', -4]],
-    }),
+    when: (w) => {
+      const e = w.economy;
+      if (!e.millOpen || e.harvestLastYear >= 0.8 * e.millDemand) return 0;
+      // when the stands are exhausted a higher quota only hastens the closure: ask for more forest
+      if (stockLimited(w)) return timberShortfallCells(w).length > 0 ? 1 : 0;
+      return w.policies.harvest !== 'high' ? 1 : 0;
+    },
+    make: (w) => {
+      const pct = Math.round((100 * w.economy.harvestLastYear) / w.economy.millDemand);
+      if (stockLimited(w)) {
+        const cells = timberShortfallCells(w);
+        return {
+          title: 'Open more forest to the mill',
+          text: `The mill cut only ${pct}% of its log demand last year: every stand in the Timber zone that is ready to cut has been cut, and a higher quota will not make trees grow faster. Add ${cells.length} ha of roaded forest to the Timber zone or the night shift goes.`,
+          action: { type: 'zone', zone: ZONE.TIMBER, cells, label: 'Timber zone expansion' },
+          acceptDelta: 12,
+          declineDelta: -9,
+          sideEffects: [['conservation', -4]],
+        };
+      }
+      return {
+        title: 'Keep the mill running',
+        text: `The mill cut only ${pct}% of its log demand last year. Raise the harvest quota or the night shift goes.`,
+        action: { type: 'policy', key: 'harvest', value: w.policies.harvest === 'low' ? 'medium' : 'high' },
+        acceptDelta: 12,
+        declineDelta: -9,
+        sideEffects: [['conservation', -4]],
+      };
+    },
   },
   {
     key: 'salvage',
@@ -357,15 +421,25 @@ const TEMPLATES: PetitionTemplate[] = [
   {
     key: 'campground',
     faction: 'tourism',
-    when: (w) => (w.camps.length < 3 && w.factions.tourism.approval < 58 ? 0.6 : 0),
-    make: () => ({
-      title: 'More places to camp',
-      text: `Visitors are turned away every weekend. Build another campground ($${COST.camp / 1000}k).`,
-      action: { type: 'fund', amount: COST.camp, label: 'New campground' },
-      acceptDelta: 9,
-      declineDelta: -5,
-      sideEffects: [['conservation', -2]],
-    }),
+    // only when the campgrounds really are full (v1.0 asked every three years while approval was
+    // below 58, and granting it built nothing and cost nothing)
+    when: (w) => {
+      const share = w.memory.turnedAwayShare ?? 0;
+      if (share < CAMP_PETITION_SHARE) return 0;
+      return bestCampSite(w) >= 0 ? Math.min(0.9, 0.3 + 1.5 * share) : 0;
+    },
+    make: (w) => {
+      const site = bestCampSite(w);
+      const pct = Math.round(100 * (w.memory.turnedAwayShare ?? 0));
+      return {
+        title: 'More places to camp',
+        text: `${pct}% of last year’s visitors found the campgrounds full and went elsewhere. Build a campground ${placeName(w, site)} ($${COST.camp / 1000}k, then $${COST.campUpkeep / 1000}k a year).`,
+        action: { type: 'fund', amount: COST.camp, label: 'New campground', cells: [site] },
+        acceptDelta: 9,
+        declineDelta: -5,
+        sideEffects: [['conservation', -2]],
+      };
+    },
   },
 ];
 
@@ -460,7 +534,18 @@ function applyPetition(w: World, p: Petition): void {
       w.spend('Infrastructure', a.amount);
       dredge(w, 0.3);
     } else if (label === 'New campground') {
-      w.memory.pendingCampground = true;
+      // build on the site the petition named, or the next best if that one is no longer possible
+      let site = a.cells?.[0] ?? -1;
+      if (!campSiteValid(w, site)) site = bestCampSite(w);
+      if (site < 0) {
+        // nowhere left to build: nothing is built, nothing is paid, and nobody is pleased
+        p.acceptDelta = 0;
+        p.sideEffects = [];
+        w.record('people', 'No site could be found for the new campground; nothing was built.', 1);
+        return;
+      }
+      buildCampground(w, site);
+      w.notify(`New campground built ${placeName(w, site)}.`, 'good', site % w.W, (site / w.W) | 0);
     }
   }
 }
