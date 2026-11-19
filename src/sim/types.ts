@@ -124,8 +124,12 @@ export type ProjectStatus = 'queued' | 'active' | 'waiting' | 'burning' | 'done'
 export interface Project {
   id: number;
   kind: ProjectKind;
-  cells: number[];
+  /** Every cell in the treatment unit (sorted) */
+  unit: number[];
+  /** Cells not yet treated */
+  todo: number[];
   done: number; // cells completed
+  progress: number; // fractional progress on the current cell
   status: ProjectStatus;
   species: number; // for planting
   createdDay: number;
@@ -135,7 +139,8 @@ export interface Project {
   label: string;
   /** for burns: fire id while burning */
   fireId: number;
-  /** cell membership for burn containment */
+  burnDays: number;
+  waitDays: number;
   cx: number;
   cy: number;
 }
@@ -266,6 +271,7 @@ export interface Policies {
   airPatrol: boolean;
   autoDispatch: boolean;
   salvage: boolean;
+  smokeRules: boolean;
 }
 
 export interface Petition {
@@ -278,11 +284,14 @@ export interface Petition {
   acceptDelta: number; // approval delta for the petitioning faction on accept
   declineDelta: number;
   sideEffects: Array<[FactionId, number]>; // other factions' approval deltas if accepted
+  key?: string;
+  resolved?: boolean;
+  accepted?: boolean;
 }
 
 export type PetitionAction =
   | { type: 'policy'; key: keyof Policies; value: string | boolean }
-  | { type: 'fund'; amount: number; label: string }
+  | { type: 'fund'; amount: number; label: string; cells?: number[] }
   | { type: 'zone'; zone: number; cells: number[]; label: string }
   | { type: 'reintroduce-wolves' }
   | { type: 'none' };

@@ -494,7 +494,7 @@ export function projectContains(w: World, projectId: number, cell: number): bool
   let s = projectSets.get(projectId);
   if (!s) {
     const pr = w.projects.find((p) => p.id === projectId);
-    s = new Set(pr ? pr.cells : []);
+    s = new Set(pr ? pr.unit : []);
     projectSets.set(projectId, s);
   }
   return s.has(cell);

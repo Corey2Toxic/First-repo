@@ -434,10 +434,14 @@ export function initialZones(w: World): void {
       L.zone[i] = ZONE.RECREATION;
     } else if (L.grass[i] > 0.35 && can < 0.3 && townDist[i] < 26 && L.slope[i] < 0.25) {
       L.zone[i] = ZONE.RANGE;
-    } else if (L.pine[i] + L.fir[i] > 0.42 && roadDist[i] <= 5 && townDist[i] > 4 && L.elev[i] < 2650) {
+    } else if (L.pine[i] + L.fir[i] > 0.34 && roadDist[i] <= 10 && townDist[i] > 4 && L.elev[i] < 2650 && L.slope[i] < 0.45) {
       L.zone[i] = ZONE.TIMBER;
     }
   }
+  // the mill was built to the size of the working forest (~2.4 t/ha/yr sustained yield)
+  let timber = 0;
+  for (let i = 0; i < w.N; i++) if (L.zone[i] === ZONE.TIMBER) timber++;
+  w.economy.millDemand = Math.round(Math.max(3500, Math.min(9000, timber * 2.4)) / 100) * 100;
 }
 
 export function nameLandmarks(w: World, names: NameBank, info: TerrainInfo): void {

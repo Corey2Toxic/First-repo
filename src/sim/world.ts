@@ -214,6 +214,44 @@ export interface StatsSeries {
   snowPeak: number[];
 }
 
+export interface WorldMemory {
+  nearTownFireDays: number;
+  smokeComplaints: number;
+  rxSmokeDays: number;
+  lastDepredationDay: number;
+  wolfReintroYear: number;
+  lastPetitionYear: Record<string, number>;
+  acceptedPetitions: number;
+  declinedPetitions: number;
+  biggestFireId: number;
+  fireBanActive: boolean;
+  fireBanDays: number;
+  scenic?: number;
+  oldGrowthStart?: number;
+  ogNow?: number;
+  visitorsBase?: number;
+  rangeStart?: number;
+  recentLoss?: number;
+  recentDepredations?: number;
+  recentEscapes?: number;
+  recentWolfKills?: number;
+  lastYearSmoke?: number;
+  codeAdoptedDay?: number;
+  roadsBuilt?: number;
+  roadsCut?: number;
+  policyChanges?: number;
+  wolfReleases?: number;
+  pendingCampground?: boolean;
+  millClosedYear?: number;
+  trustSum?: number;
+  trustYears?: number;
+  startPopulation?: number;
+  startHazard?: number;
+  outbreakYear?: number;
+  startDeer?: number;
+  lastReturned?: number;
+}
+
 export interface ReviewState {
   pending: boolean;
   year: number;
@@ -247,6 +285,8 @@ export class World {
   /** Current sub-step within the day (0..SUBSTEPS_PER_DAY-1) */
   sub = 0;
   startYear = 1;
+  /** Year whose start-of-year processing has run (persisted). */
+  lastYearStarted = 0;
 
   valleyName = 'The Valley';
   landmarks: Landmark[] = [];
@@ -306,15 +346,16 @@ export class World {
     megafires: 0,
     lastMegafireYear: -999,
     debrisFlows: 0,
+    yearHarvestCells: 0,
   };
-  /** Transient per-year accumulators for faction drivers and petitions */
-  memory = {
+  /** Accumulators and remembered facts that drive politics and narrative */
+  memory: WorldMemory = {
     nearTownFireDays: 0,
     smokeComplaints: 0,
     rxSmokeDays: 0,
     lastDepredationDay: -9999,
     wolfReintroYear: -1,
-    lastPetitionYear: {} as Record<string, number>,
+    lastPetitionYear: {},
     acceptedPetitions: 0,
     declinedPetitions: 0,
     biggestFireId: -1,
@@ -416,6 +457,7 @@ export class World {
       airPatrol: false,
       autoDispatch: true,
       salvage: false,
+      smokeRules: false,
     };
     const approvals = {} as Record<FactionId, number[]>;
     for (const f of FACTIONS) approvals[f] = [];
