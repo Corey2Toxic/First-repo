@@ -242,6 +242,7 @@ export interface WorldMemory {
   roadsCut?: number;
   policyChanges?: number;
   wolfReleases?: number;
+  /** v1.0 only: set by the campground petition and never read. Kept so old saves type-check. */
   pendingCampground?: boolean;
   millClosedYear?: number;
   /** This year so far: visitors who wanted to come, and those turned away for want of room. */

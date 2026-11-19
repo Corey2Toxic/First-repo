@@ -7,7 +7,7 @@
 import { clamp, clamp01 } from '../grid.ts';
 import { FACTIONS, FACTION_NAMES, ZONE } from '../types.ts';
 import type { FactionId, Petition, PetitionAction } from '../types.ts';
-import { econCache, ledgerTotals } from './economy.ts';
+import { bestCampSite, buildCampground, campSiteValid, econCache, ledgerTotals } from './economy.ts';
 import { vegetationSummary } from './vegetation.ts';
 import { createProject } from './projects.ts';
 import { hazardIndex } from './fuels.ts';
@@ -191,6 +191,40 @@ function townBufferCells(w: World, townId: number): number[] {
   return out.slice(0, 40).map((p) => p[1]);
 }
 
+const COMPASS = ['east', 'southeast', 'south', 'southwest', 'west', 'northwest', 'north', 'northeast'];
+
+/** “near Mirror Lake, 2.4 km northeast of Pinecrest”: where a cell is, in words. */
+export function placeName(w: World, i: number): string {
+  const x = (i % w.W) + 0.5,
+    y = ((i / w.W) | 0) + 0.5;
+  let mark = '',
+    md = 8;
+  for (const m of w.landmarks) {
+    if (m.kind === 'town') continue;
+    const d = Math.hypot(m.x - x, m.y - y);
+    if (d < md) {
+      md = d;
+      mark = m.name;
+    }
+  }
+  let town = w.towns[0],
+    td = Infinity;
+  for (const t of w.towns) {
+    const d = Math.hypot(t.x - x, t.y - y);
+    if (d < td) {
+      td = d;
+      town = t;
+    }
+  }
+  if (!town) return mark ? `near ${mark}` : 'in the valley';
+  const dir = COMPASS[Math.round(Math.atan2(y - town.y, x - town.x) / (Math.PI / 4)) & 7];
+  const where = `${(td / 10).toFixed(1)} km ${dir} of ${town.name}`;
+  return mark ? `near ${mark}, ${where}` : where;
+}
+
+/** Share of last year's would-be visitors turned away for want of room above which tourism asks for a campground. */
+export const CAMP_PETITION_SHARE = 0.15;
+
 const TEMPLATES: PetitionTemplate[] = [
   {
     key: 'raise-harvest',
@@ -357,15 +391,25 @@ const TEMPLATES: PetitionTemplate[] = [
   {
     key: 'campground',
     faction: 'tourism',
-    when: (w) => (w.camps.length < 3 && w.factions.tourism.approval < 58 ? 0.6 : 0),
-    make: () => ({
-      title: 'More places to camp',
-      text: `Visitors are turned away every weekend. Build another campground ($${COST.camp / 1000}k).`,
-      action: { type: 'fund', amount: COST.camp, label: 'New campground' },
-      acceptDelta: 9,
-      declineDelta: -5,
-      sideEffects: [['conservation', -2]],
-    }),
+    // only when the campgrounds really are full (v1.0 asked every three years while approval was
+    // below 58, and granting it built nothing and cost nothing)
+    when: (w) => {
+      const share = w.memory.turnedAwayShare ?? 0;
+      if (share < CAMP_PETITION_SHARE) return 0;
+      return bestCampSite(w) >= 0 ? Math.min(0.9, 0.3 + 1.5 * share) : 0;
+    },
+    make: (w) => {
+      const site = bestCampSite(w);
+      const pct = Math.round(100 * (w.memory.turnedAwayShare ?? 0));
+      return {
+        title: 'More places to camp',
+        text: `${pct}% of last year’s visitors found the campgrounds full and went elsewhere. Build a campground ${placeName(w, site)} ($${COST.camp / 1000}k, then $${COST.campUpkeep / 1000}k a year).`,
+        action: { type: 'fund', amount: COST.camp, label: 'New campground', cells: [site] },
+        acceptDelta: 9,
+        declineDelta: -5,
+        sideEffects: [['conservation', -2]],
+      };
+    },
   },
 ];
 
@@ -460,7 +504,18 @@ function applyPetition(w: World, p: Petition): void {
       w.spend('Infrastructure', a.amount);
       dredge(w, 0.3);
     } else if (label === 'New campground') {
-      w.memory.pendingCampground = true;
+      // build on the site the petition named, or the next best if that one is no longer possible
+      let site = a.cells?.[0] ?? -1;
+      if (!campSiteValid(w, site)) site = bestCampSite(w);
+      if (site < 0) {
+        // nowhere left to build: nothing is built, nothing is paid, and nobody is pleased
+        p.acceptDelta = 0;
+        p.sideEffects = [];
+        w.record('people', 'No site could be found for the new campground; nothing was built.', 1);
+        return;
+      }
+      buildCampground(w, site);
+      w.notify(`New campground built ${placeName(w, site)}.`, 'good', site % w.W, (site / w.W) | 0);
     }
   }
 }
