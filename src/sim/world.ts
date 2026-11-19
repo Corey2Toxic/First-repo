@@ -254,6 +254,8 @@ export interface WorldMemory {
   deerK?: number;
   returnedTotal?: number;
   allocTotal?: number;
+  /** Id of the guided first season's lesson fire, once it has been lit. */
+  tutorialFireId?: number;
 }
 
 export interface ReviewState {

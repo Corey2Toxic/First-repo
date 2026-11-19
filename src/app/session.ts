@@ -67,6 +67,9 @@ export interface Settings {
   sharp: boolean;
 }
 
+/** Keys that pan or zoom the camera (see keydown and panKeys). */
+const CAMERA_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', '+', '=', '-', '_'];
+
 const TOOL_COLORS: Partial<Record<ToolId, string>> = {
   zone: '#e8e2c0',
   thin: '#7fd18b',
@@ -115,6 +118,11 @@ export class GameSession {
   private overlayCanvas: HTMLCanvasElement;
   private disposers: Array<() => void> = [];
   private disposed = false;
+  /**
+   * Camera moves the player made (wheel, pinch, drag-pan, keyboard pan/zoom); programmatic
+   * focus never counts. The tutorial's "Look around" step waits for real input.
+   */
+  camInputs = 0;
   lastSaved = '';
   onEnd: (() => void) | null = null;
 
@@ -367,6 +375,7 @@ export class GameSession {
     on(window, 'resize', () => this.resize());
     on(el, 'wheel', (e: WheelEvent) => {
       e.preventDefault();
+      this.camInputs++;
       const r = el.getBoundingClientRect();
       this.cam.zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0016));
     }, { passive: false });
@@ -388,6 +397,7 @@ export class GameSession {
         }
         this.dragging = null;
         this.pinch = this.pinchState();
+        this.camInputs++;
         return;
       }
       const painting = e.button === 0 && this.toolPaints();
@@ -418,7 +428,10 @@ export class GameSession {
       if (d) {
         const dx = x - d.x,
           dy = y - d.y;
-        if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
+        if (!d.moved && Math.abs(dx) + Math.abs(dy) > 3) {
+          d.moved = true;
+          if (!d.painting) this.camInputs++; // a drag-pan begins
+        }
         if (d.painting) this.pointerPaint(x, y, e.shiftKey, false);
         else if (d.moved) {
           this.cam.panPixels(dx, dy);
@@ -614,6 +627,7 @@ export class GameSession {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     const k = e.key.toLowerCase();
     this.keys.add(k);
+    if (!e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && CAMERA_KEYS.includes(k)) this.camInputs++;
     if (k === ' ') {
       e.preventDefault();
       this.togglePause();

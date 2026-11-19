@@ -14,6 +14,7 @@ import { layRoad, roadCost } from './gen/settle.ts';
 import { beaverSiteScore } from './gen/wildlife.ts';
 import { NameBank } from './gen/names.ts';
 import { applyAllocation, handleReviewCommand } from './systems/council.ts';
+import { tutorialIgnition } from './tutorial.ts';
 import type { World } from './world.ts';
 
 export type Command =
@@ -34,6 +35,8 @@ export type Command =
   | { t: 'relocateBeavers'; cell: number }
   | { t: 'petition'; id: number; accept: boolean }
   | { t: 'closeReview' }
+  /** The guided first season's lesson fire (see tutorial.ts); logged so replays reproduce it. */
+  | { t: 'tutorialIgnition'; cell: number }
   /** After the legacy report: stay on as warden for another 25 years (sandbox). */
   | { t: 'continueSandbox' };
 
@@ -156,6 +159,8 @@ export function validateCommand(w: World, cmd: Command): string | null {
     case 'closeReview':
     case 'continueSandbox':
       return null;
+    case 'tutorialIgnition':
+      return isCell(w, cmd.cell) ? null : 'That place is off the map.';
     default:
       return 'Unknown command.';
   }
@@ -389,6 +394,10 @@ function apply(w: World, cmd: Command): CommandResult {
     case 'closeReview':
       // handled by the council system (factions.ts) which owns review state
       return handleReviewCommand(w, cmd);
+    case 'tutorialIgnition': {
+      const r = tutorialIgnition(w, cmd.cell);
+      return r.fire ? { ok: true, msg: r.msg } : fail(r.msg);
+    }
     case 'continueSandbox': {
       // v1.0 did this in the UI, outside the log: it silently forgave any debt (no ledger entry)
       // and skipped the allocation the closing review never made
