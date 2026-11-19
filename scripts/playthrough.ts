@@ -93,7 +93,8 @@ while (Date.now() - t0 < 45000) {
   if (st.review) break;
   if (st.card) {
     const btn = await page.$('.advisor .btn.primary');
-    if (btn) await btn.click();
+    // (software WebGL at top speed renders ~2 fps; a slow click is retried on the next pass)
+    if (btn) await btn.click({ timeout: 8000 }).catch(() => {});
   }
   // keep speed up even if a fire slowed things down
   await page.evaluate(() => (window as any).fireweed.setSpeed(4));
@@ -105,14 +106,55 @@ const info = await page.evaluate(() => {
   return { day: w.day, year: w.year, fires: w.fires.length, burned: w.counters.yearBurned, funds: Math.round(w.economy.funds), review: w.review.pending, notes: Object.keys(w.discoveries).length, tps: Math.round(s.ticksPerSec), fps: Math.round(s.fps) };
 });
 console.log(JSON.stringify(info));
-// open a few panels
+// the year-end council review blocks the map until it is answered: answer it as a player would
+await page.waitForTimeout(1500);
+if (await page.$('.modal-back')) {
+  await shot('09-council-review');
+  const grant = await page.$('.petition .btn.primary');
+  if (grant) {
+    await grant.click();
+    await page.waitForTimeout(400);
+  }
+  const close = await page.$('.modal .btn.primary:has-text("Begin year")');
+  if (close) {
+    await close.click();
+    await page.waitForTimeout(800);
+  }
+}
+// open a few panels (paused: under software WebGL at top speed the page runs at ~2 fps, too slow for
+// the browser driver's click checks)
+await page.evaluate(() => (window as any).fireweed.setSpeed(0));
+await page.waitForTimeout(1000);
 for (const label of ['Council', 'Trends', 'Field notes', 'Policies']) {
   const b = await page.$(`.dock button:has-text("${label}")`);
-  if (b) {
-    await b.click();
-    await page.waitForTimeout(500);
-    await shot('09-panel-' + label.replace(/\s+/g, '-').toLowerCase());
+  if (!b) continue;
+  const isOpen = () => b.evaluate((el) => el.classList.contains('on'));
+  try {
+    await b.click({ timeout: 5000 });
+  } catch {
+    // on a ~2 fps software renderer the click often lands while the driver's checks time out
+    if (!(await isOpen())) {
+      // something may be open over the dock (a field-note card, a drawer): close it as a player would
+      await page.keyboard.press('Escape');
+      for (const x of await page.$$('.modal .btn:has-text("Close"), .modal .btn:has-text("Got it")')) await x.click().catch(() => {});
+      await page.waitForTimeout(400);
+      await b.click({ timeout: 5000 }).catch(() => {});
+    }
+    if (!(await isOpen())) {
+      const over = await page.evaluate((l) => {
+        const btn = [...document.querySelectorAll('.dock button')].find((x) => x.textContent?.includes(l));
+        if (!btn) return 'no button';
+        const r = btn.getBoundingClientRect();
+        const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) as HTMLElement | null;
+        return `${el?.tagName}.${el?.className} "${(el?.textContent ?? '').slice(0, 80)}"`;
+      }, label);
+      console.log('could not open panel', label, '- covered by', over);
+      await shot('10-blocked-' + label.replace(/\s+/g, '-').toLowerCase());
+      continue;
+    }
   }
+  await page.waitForTimeout(500);
+  await shot('10-panel-' + label.replace(/\s+/g, '-').toLowerCase());
 }
 console.log(errors.length ? errors.join('\n') : 'no console errors');
 await browser.close();

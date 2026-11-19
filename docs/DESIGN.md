@@ -58,8 +58,9 @@ and human ignitions happen in the afternoon sub-step. The UI offers five speeds 
   warming trend (°C/decade).
 - Daily: seasonal temperature + AR(1) anomaly; Markov wet/dry chain with monthly climatology; summer
   convective storms (Poisson strikes, "dry lightning" more likely in drought); multi-day dry downslope
-  wind events blowing toward the outlet in late summer/autumn; humidity, wind, a drought index, and
-  smoke dispersion (inversions on calm cold days).
+  wind events blowing toward the outlet in late summer/autumn; humidity, wind, the Keetch–Byram
+  drought index (v1.1; v1.0's index sat at its ceiling every summer) read through a normalised drought
+  severity, and smoke dispersion (inversions on calm cold days).
 - Valley fire-danger rating (Low → Extreme) from median fuel moisture, wind and drought.
 
 ### Moisture (`systems/moisture.ts`)
@@ -94,14 +95,17 @@ a staggered schedule:
   (roads, campgrounds, recreation zones, town fringes, timber operations), scaled by visitors, danger,
   population and fire bans.
 - **Spread** is a stochastic **minimum-travel-time** process: from each burning cell, the arrival time
-  at each neighbour is drawn from an exponential with the local rate of spread
-  `R = R0(fuel) · η(moisture/extinction) · exp(0.22·U_mid·cosθ) · slope factor · diurnal factor`,
-  where η is Rothermel's moisture-damping polynomial and extinction moisture depends on fuel type (cured
-  grass ≈15%, litter ≈28%). Events are processed in time order within each 3-hour step, so fast fires
-  are not capped at one cell per step. Barriers: water, wide rivers, roads, fuel breaks, fireline,
-  retardant, water drops, recent burns.
+  at each of 16 neighbours (the 8 adjacent cells and the 8 knight moves) is drawn from an Erlang(8)
+  distribution around the local rate of spread. The head
+  rate depends on fuel *type* (cured grass from the CSIRO grassland model, shrub and litter from
+  Rothermel-type wind responses fitted to fuel models 5, 8 and 9), mid-flame wind under the canopy,
+  Rothermel's moisture damping, slope and the diurnal cycle, and is distributed on a wind ellipse
+  (v1.1; see `FIRE_MODEL.md`). Events are processed in time order within each 3-hour step, so fast
+  fires are not capped at one cell per step. Barriers: water, wide rivers, fireline, retardant, water
+  drops; roads and fuel breaks stop surface fire unless wind or intensity pushes it across; ground
+  burned this season has no cured grass until next year's crop.
 - **Crowning**: surface intensity × (0.35 + 1.1 × ladder) above a threshold, with enough canopy and dry
-  crowns, starts crown fire that spreads with wind-driven crown rates.
+  crowns, starts crown fire that runs on a narrower wind ellipse (length-to-breadth up to 5).
 - **Spotting**: intense and crowning cells loft embers downwind (distance ∝ wind) that ignite receptive
   fuel — and houses — beyond barriers.
 - **Phases**: a flaming front (one step), then smouldering in heavy fuel and duff (residence grows with
@@ -123,12 +127,16 @@ A scalar field emitted by burning cells, advected semi-Lagrangian downwind, diff
 rate set by the day's dispersion; poor dispersion traps smoke in low ground. Towns record smoky days.
 
 ### Crews (`systems/crews.ts`)
-Hand crews, engines, helicopters, each a state machine (idle → moving → working → returning) with A*
-pathing over a cost surface (roads fast, steep brush slow, never through fire). Hand crews cut line along
-the perimeter where it is safe (not adjacent to crown fire), mop up smouldering edges, and retreat from
-crown runs; engines defend structures and attack low-intensity fire near roads; helicopters drop water
-at a rate set by distance to the nearest lake, river or beaver pond. Day shifts only (engines defend at
-night). Overtime is charged to the fire. An automatic dispatcher prioritises by threat to towns and size.
+Hand crews, engines, helicopters, each a state machine (idle → moving → working → resting → returning)
+with A* pathing over a cost surface (roads ~30 km/h, open level ground ~2.5 km/h on foot, steep brush
+slow, never through fire; helicopters ~160 km/h). Hand crews cut line along the perimeter where it is
+safe (not adjacent to crown fire), mop up smouldering edges, and retreat from crown runs; they work a
+small fire through its first night at reduced output. Engines defend structures, drive gentle open
+ground and attack the fire's edge within hose reach; helicopters drop water at a rate set by distance to
+the nearest lake, river or beaver pond. Overtime is charged to the fire. The automatic dispatcher runs
+every 3-hour step while a reported fire burns (v1.0: once a day, at midnight), sends each fire the
+nearest free crews of each kind in priority order (Community Buffer fires first), and releases all but a
+patrol crew from lined, smouldering fires at dawn.
 
 ### Projects (`systems/projects.ts`)
 Thinning (removes shrubs and young trees, leaves slash unless piled and burned), prescribed burns
@@ -138,39 +146,51 @@ escapes become wildfires), planting (pine, fir or aspen), shaded fuel breaks (ma
 
 ### Economy (`systems/economy.ts`)
 Daily wages and upkeep; Timber zones harvested each autumn up to the mill's demand × quota (selective
-or clearcut, optional salvage of dead timber; slash left or piled); a three-year shortfall closes the
-mill; grazing fees; visitors in summer and autumn driven by scenery (forest, old growth, aspen gold,
-wildlife, minus scars, clearcuts, smoke, closures and bans); hunting licences; a wandering timber price.
+or clearcut, optional salvage of dead timber; slash left or piled). The mill is sized to 75 % of what
+its Timber zone sustains on a 15-year re-entry; three consecutive short years close it, and a closed
+mill reopens once ready stands hold two years of demand. Grazing fees; visitors in summer and autumn
+are the smaller of demand (scenery: forest, old growth, aspen gold, wildlife, minus scars, clearcuts,
+smoke, closures and bans) and campground capacity, so campgrounds pay only while people are turned
+away; one campground per site. Hunting licences; a wandering timber price.
 
 ### Wildlife (`systems/wildlife.ts`)
 - **Deer herds** migrate (summer high, winter low), choose forage while avoiding snow, people and wolf
-  "fear"; eat grass, shrubs and young aspen, leaving a **browse** field; body condition tracks forage per
-  animal in summer and draws down in winter; fawning and mortality are density dependent against a
-  carrying capacity estimated from total forage; hunting removes a policy-set share each autumn.
-- **Wolf packs** patrol territories that drift toward good hunting, chase vulnerable herds, kill with
-  success depending on pack size, deer condition and snow; hunger scales with pack size; pups need prey;
-  big packs bud off dispersers that found new packs where territories are free; packs near rangeland may
-  kill cattle, triggering lethal control (policy-dependent); empty valleys are occasionally recolonised
-  by dispersing pairs. Packs paint a **fear** field that deer avoid — so browse falls where wolves roam.
+  "fear". Each herd eats from the ground it covers (~1 ha per deer a day, at most 3 % of the forage
+  there), taking grass and shrubs and young aspen and leaving a **browse** field that also holds back
+  regrowth. Winter range is the bottleneck: late-winter body condition sets the fawn crop and thin deer
+  die. There is no carrying-capacity term (v1.1; v1.0 imposed a global logistic K): density dependence
+  emerges from crowding on shared range. Hunting removes a policy-set share each autumn.
+- **Wolf packs** hold ~130 km² territories, travel 15–25 km a day, hunt when hungry (about one deer per
+  wolf per 18 days) with a type II functional response, kill with success depending on pack size, deer
+  condition and snow, and raise pups in proportion to deer per wolf (Fuller 1989); young wolves leave
+  when prey runs short, and new packs form only in vacant territory, by budding or by pairs arriving
+  from outside (~25 %/yr while there is room and prey). Packs near rangeland may kill cattle, triggering
+  lethal control (policy-dependent). Packs paint a **fear** field that deer avoid.
 - **Beaver colonies** settle gentle streams with willow/aspen, eat it, and build dams whose ponds back up
   the channel and flood low ground: wetter soils, green firebreaks, helicopter water, sediment traps and
-  slow-release baseflow. Colonies abandon depleted sites (ponds drain into rich meadows) and disperse
-  young to new sites.
+  slow-release baseflow. Any pair with food breeds; colonies of five or more send dispersers to real
+  stream habitat within 3 km; a colony reduced below a pair ends; depleted sites are abandoned (ponds
+  drain into rich meadows); pairs from neighbouring drainages settle a valley with room.
 
 ### Bark beetles (`systems/beetles.ts`)
-Monthly in the flight season: beetle pressure grows toward stand susceptibility (big pines × drought
-stress × crowding × warmth) and immigrates from neighbours; mass attacks kill pines whose defences are
-overwhelmed, producing red-needle canopy (a short-lived crown-fire hazard) and snags. The coldest
-winter nights kill larvae.
+An eruptive model (v1.1): an endemic population lives in big pine; tree resistance is worn down by
+multi-year drought (a two-year drought-memory layer) and crowding; when local beetle pressure
+overwhelms resistance the population erupts into mass attack, which kills pines (red-needle canopy, a
+short-lived crown-fire hazard, then snags) and ends by using up its host. Winter kill follows each
+cell's own coldest night (elevation-lapsed).
 
 ### Watershed (`systems/hydrology.ts`)
-Runoff routed downstream in topological order; erosion from runoff × slope × bare/burned/water-repellent
-ground; sediment carried until ponds, lakes or the reservoir trap it; reservoir storage vs. town demand
-and evaporation; siltation and turbidity; debris flows from heavy rain on fresh severe burns, which can
-bury homes.
+Runoff routed downstream in topological order; erosion from surface runoff × slope × a RUSLE-like
+ground-cover factor × water repellency; sediment carried until ponds, lakes or the reservoir trap it
+(Brune's trap-efficiency curve); reservoir storage vs. town demand and evaporation, with a minimum
+instream release and spill passed down the river below the dam (v1.1; v1.0 deleted the surplus);
+siltation and turbidity; debris flows from heavy rain on fresh severe burns, which can bury homes
+(counted as homes lost).
 
 ### Towns (`systems/towns.ts`)
-Smoke exposure, fire threat, firewise readiness (building code + low hazard within ~400 m of homes),
+Smoke exposure, fire threat, firewise readiness (building code + low hazard within ~400 m of homes +
+treated **Community Buffer** within ~1 km; buffers are maintained yearly at $45/ha, their fires are
+always fought and dispatched first, and towns do not grow into them),
 yearly growth from jobs and amenity minus losses, smoke and water shortages, expansion preferentially
 into forest near roads (the WUI grows), rebuilding of burned homes, mill-town shrinkage when the mill
 closes.
@@ -216,10 +236,14 @@ allocated yearly from trust; crews' time and burn windows are the binding constr
 - Dismissal (trust < 30 at two consecutive reviews, or < 18 at one), receivership (debt beyond
   $600k), or completion of the tenure (15–80 years by scenario/custom).
 - **Legacy score (0–100)**: homes kept safe (15), a living community (10), fire doing its work —
-  low/moderate share of burned area (8), a resilient forest — fuel hazard trend (7), wild things —
-  wolves, beavers, a healthy deer herd (9), diversity of the vegetation mosaic (6), clean water (10),
-  sound finances (10), the council's trust (25). Early exits scale the score by time served. Grades
-  from "A Cautionary Tale" to "Legend of the Valley", plus a generated epilogue.
+  enough good fire (≥ 1 %/yr of the valley at low/moderate severity, wild or prescribed) at a low
+  high-severity share (8), safer around homes — fuel hazard within 5 cells of homes vs. the start (7),
+  wild things — share of the tenure with wolves, mean beaver colonies, share of the tenure with 1–10
+  deer/km² in fair condition (9), diversity of the vegetation mosaic and old growth kept (6), clean
+  water — tenure-average silt and severe-burn share (10), sound finances — solvency and the mill (10),
+  the council's trust (25). Early exits scale the score by time served. Grades from "A Cautionary
+  Tale" to "Legend of the Valley" (re-based in v1.1 so that doing nothing earns a C), plus a generated
+  epilogue. No petitions are put to an outgoing warden.
 - After the end you may keep playing as a sandbox (+25 years).
 
 ## Discovery

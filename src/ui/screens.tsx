@@ -8,6 +8,7 @@ import type { GameConfig, ScenarioId } from '../sim/world.ts';
 import { listSlots } from '../app/storage.ts';
 import type { SlotInfo } from '../app/storage.ts';
 import { money } from './format.ts';
+import { GAME_VERSION } from '../version.ts';
 
 export function TitleScreen(props: { onNew: () => void; onContinue: (slot: string) => void; onImport: (f: File) => void; onHelp: () => void }) {
   const [slots, setSlots] = useState<SlotInfo[]>([]);
@@ -21,6 +22,9 @@ export function TitleScreen(props: { onNew: () => void; onContinue: (slot: strin
       <div class="title-wrap" style={{ position: 'relative' }}>
         <div class="logo">FIREWEED</div>
         <div class="subtitle">A century of fire, forest, wildlife — and the people in between.</div>
+        <div class="faint" style={{ fontSize: '11.5px', marginTop: '6px', letterSpacing: '0.08em' }}>
+          v{GAME_VERSION}
+        </div>
         <div class="menu" style={{ marginTop: '18px' }}>
           <button class="btn primary" onClick={props.onNew} autofocus>
             New valley

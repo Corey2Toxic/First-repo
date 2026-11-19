@@ -46,11 +46,20 @@ the fine fuel:
 * Direction: the head rate is distributed on an ellipse, `R(θ) = R_head (1 − e)/(1 − e cos θ)`,
   whose length-to-breadth ratio grows with wind (Alexander 1985 for forest fuels, Cheney & Sullivan
   for grass, blended by grass share, capped at 8:1).
-* Cell crossing times are Erlang(4) with the specified mean, so the simulated front advances close
-  to the specified rate while keeping enough roughness to hide the grid's octagonal bias
-  (axis/diagonal ratio 0.96–0.98 in the fire lab).
-* Crown fire: v1.0's formula, multiplied by `CROWN_SCALE = 2.2` to restore the same observed crown
-  front speeds under Erlang(4) times (the audit found them realistic).
+* Spread uses a 16-direction stencil (the 8 neighbours plus the 8 knight moves, at most 26.6°
+  apart); a knight move needs both cells it crosses to carry fire and never lands on a road or fuel
+  break. Each direction takes the ellipse's rate at its angle from the wind less half the gap to its
+  neighbouring directions, so a head fire pointing between two directions still runs at ≥ 97 % of its
+  rate. (The first v1.1 build evaluated the ellipse on 8 neighbours only: with the wind at 22.5° a
+  grass head fire ran at ~25 % of its on-axis distance. The auditor's anisotropy harness found it;
+  see below.)
+* Cell crossing times are Erlang(8) with the specified mean, so the simulated front advances close
+  to the specified rate in every direction while keeping enough roughness to hide the stencil's
+  polygonal bias (calm-wind axis/diagonal ratio 0.99 in the fire lab).
+* Crown fire: v1.0's head-rate formula, scaled by `CROWN_SCALE = 3.0` and distributed on a wind
+  ellipse (length-to-breadth from Alexander 1985, capped at 5:1). v1.0's lateral crown rate also grew
+  with wind, so its crown fires were nearly circular and burned ~4–5× the area of a real crown run of
+  the same head speed; the scale keeps head speeds in the observed range under Erlang(8) times.
 
 ### Effective-rate factors (calibration, not physics)
 
@@ -66,7 +75,9 @@ litter. Three explicit factors account for that:
 Sensitivity (20-year medium-map runs, default management): with `KE_GRASS = 0.35` and v1.0's
 saturated drought index, grass valleys burned 11–32 %/yr — far outside any plausible regime — which
 is what exposed the drought-index and suppression problems below. Final values were chosen against
-published fuel-model rates, not against burned-area targets.
+published fuel-model rates, not against burned-area targets. (Those sensitivity runs predate the
+16-direction stencil, so they understated spread in off-axis winds; the landscape table below was
+re-measured after it.)
 
 ## Fire lab results (v1.1)
 
@@ -75,13 +86,23 @@ published fuel-model rates, not against burned-area targets.
 
 | Fuel | U = 3 m/s | U = 6 m/s | U = 12 m/s | U = 15 m/s |
 |---|---|---|---|---|
-| Cured grass (head) | 0.70 km/h | 1.33 km/h | 2.49 km/h | 3.03 km/h |
-| Shrubland | 154 m/h | 292 m/h | 588 m/h | 844 m/h |
-| Open pine, long-needle litter | 65 m/h | 96 m/h | 240 m/h | 313 m/h |
-| Dense young fir (crowning) | 77 m/h | 244 m/h | 1.04 km/h | 1.69 km/h |
+| Cured grass (head) | 0.72 km/h | 1.36 km/h | 2.49 km/h | 3.05 km/h |
+| Shrubland | 158 m/h | 310 m/h | 606 m/h | 790 m/h |
+| Open pine, long-needle litter | 48 m/h | 98 m/h | 240 m/h | 300 m/h |
+| Dense young fir (crowning) | 96 m/h | 240 m/h | 0.98 km/h | 1.59 km/h |
 
 (U is the 10 m wind; the afternoon diurnal factor raises it by ~26 % at 15:00.) Run
 `node scripts/qa/firelab.ts <path-to-v1.0/src/sim>` to reproduce the v1.0 column of the table above.
+
+Grid orientation (auditor's `exp_j2_aniso`, head distance along the wind after one afternoon step,
+24 fires per point, wind at 0° / 22.5° / 45° to the grid):
+
+| | v1.0 | v1.1, 8-direction ellipse (superseded) | v1.1 |
+|---|---|---|---|
+| Grass, 9 m/s | 9.5 / 11.1 / 11.4 cells | 129 / 33 / 131 | 130 / 151 / 150 |
+| Dense fir, 14 m/s | 55.5 / 55.4 / 55.5 | 44 / 20 / 44 | 48 / 55 / 56 |
+
+(v1.0's grass numbers are small because its grass ran 1–2 orders of magnitude too slowly.)
 
 ## Consequences that had to be corrected with it
 
@@ -101,18 +122,24 @@ fixed on their own merits, and the landscape was re-measured after each:
 Also corrected: the Simard/NFDRS equilibrium-moisture regressions now receive °F as they are defined
 (audit D19; fuels read 0.5–1 point drier).
 
-## Landscape outcome (default management, medium maps)
+## Landscape outcome (default management, 50 years)
 
-| | v1.0 (audit runs, 50 y) | v1.1 (50 y) |
+Same seeds for both versions (`scripts/qa/driver.ts`, petitions refused, no player actions):
+
+| | v1.0 | v1.1 |
 |---|---|---|
-| Tinderbox burned | 3.5–4.5 %/yr, every decade alike | 0.7–1.4 %/yr; quiet first decade, rising later (to ~3 %/yr) as fuels and warming build |
-| Tinderbox homes lost | 25–72 (inflated by fireproof stuck houses, D1) | 3–28 |
-| Boomtown | 2.5 %/yr | 2.8 %/yr, with 5–7 %/yr decades |
-| First Season | 1.7 %/yr | ~0.3–1.4 %/yr |
+| Tinderbox burned (5 runs, one a large map) | 1.7–4.5 %/yr | 1.4–5.7 %/yr; quiet first decades, rising later (decade 4 reached 15 %/yr on one seed) |
+| Tinderbox high-severity share | 12–16 % | 4–9 % |
+| Tinderbox homes lost | 25–72, plus up to 41 fireproof stuck houses (D1) | 22–117 |
+| Boomtown (medium / small) | 2.5 / 4.7 %/yr, 44 / 88 homes | 5.2 / 2.4 %/yr, 242 / 31 homes |
+| First Season (2 runs) | 1.7–2.7 %/yr | 0.6–0.7 %/yr |
 
-The fire paradox now emerges from mechanisms: effective suppression keeps early fires small, fuel
-hazard and warming accumulate, and the fires that escape on wind-event days are larger and more
-severe.
+The fire paradox emerges from mechanisms: effective suppression keeps early fires small, fuel hazard
+and warming accumulate, and the fires that escape on wind-event days are larger. Two further
+feedbacks now operate: repeated fire converts shrubland to grass (shrub cover 0.26 → 0.05–0.10 over
+50 years in the most-burned runs), and grass carries fast fire. In Boomtown, whose towns grow into
+the forest, a decade of such fires cost 157 homes on one seed under default management. Fire is less
+severe than in v1.0 because most of the extra area is fast, low-intensity grass fire.
 
 ## Limits and uncertainty
 

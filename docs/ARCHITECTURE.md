@@ -54,7 +54,10 @@ The simulation never imports from render/app/ui. The renderer only reads world s
   found this way (caches derived from eroding soil depth) and fixed by making every cache a pure function
   of persisted state.
 - **Commands** (`commands.ts`): every player action is a plain object validated and applied by one
-  function, logged with its timestamp. Bots, tests and the UI all use the same path.
+  function, logged with its timestamp. Bots, tests and the UI all use the same path. Since v1.1 a
+  structural validator refuses malformed commands with no side effects (policy values the UI does not
+  offer, off-map or fractional cells, unknown ids), because commands also arrive from replays, bots and
+  saved logs. The tutorial's lesson fire and "keep playing" after the legacy are logged commands too.
 - **Performance**: per-hectare daily systems are written as tight loops over hoisted typed arrays. A V8
   pitfall was found by profiling — the layer object built with computed keys fell into dictionary mode
   and every layer access became a hash lookup; it is forced back to fast properties (≈3× faster daily
@@ -66,11 +69,14 @@ The simulation never imports from render/app/ui. The renderer only reads world s
 
 Classic cellular automata either cap spread at one cell per step (too slow in wind) or need tiny steps
 (too expensive). Fireweed treats spread as a stochastic **minimum travel time** problem inside each
-3-hour step: every burning cell proposes arrival times to its neighbours drawn from an exponential
-distribution with the local rate of spread; a priority queue pops arrivals in time order; newly ignited
-cells immediately propose their own arrivals for the remaining time; embers are scheduled the same way.
-The probability that a single neighbour ignites within a step matches the CA probability
-`1 − exp(−R·Δt/d)`, but chains of ignitions can now propagate at the physical rate.
+3-hour step: every burning cell proposes arrival times to its neighbours drawn around the crossing time
+`d/R(θ)` set by the local, direction-dependent rate of spread; a priority queue pops arrivals in time
+order; newly ignited cells immediately propose their own arrivals for the remaining time; embers are
+scheduled the same way. v1.0 drew the crossing times from an exponential distribution; with many
+competing paths the first arrival then runs far ahead of the specified rate (3.7× in calm conditions in
+the v1.1 fire lab), so v1.1 uses Erlang(8) times on a 16-direction stencil (the 8 neighbours plus
+knight moves), which keep enough roughness to hide the stencil's polygonal bias while the front
+advances close to the specified rate in every wind direction. See `FIRE_MODEL.md`.
 
 ## Rendering
 
@@ -96,6 +102,13 @@ The probability that a single neighbour ignites within a step matches the CA pro
 manifest), then raw layer bytes. In the browser it is gzip-compressed with `CompressionStream` and
 stored in IndexedDB (autosave each season + manual slot), or exported/imported as a `.fireweed` file.
 A 240 × 168 save is ~1–2 MB compressed.
+
+Format version 4 (v1.1) saves the command log; encoding is a pure serialisation (the fire list is kept
+bounded by the simulation, not trimmed on save), so a reloaded world is identical to the live one.
+Loading merges nested state over defaults, so fields added later get defaults; v1.0 (version 3) saves
+load with repairs: houses left stuck in a dead fire are released, the lost-home total is restored from
+the towns' counts, and the new stand-age and drought-memory layers are derived.
+`tests/sim/compat.test.ts` loads a save written by the untouched v1.0 code.
 
 ## Extending
 

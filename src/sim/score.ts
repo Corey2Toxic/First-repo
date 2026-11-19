@@ -34,8 +34,8 @@ function shareOf(xs: number[], ok: (x: number) => boolean, fallback: number): nu
 
 /**
  * Grade bands, re-based in v1.1 on strategy bots (scripts/strategies.ts, 6 paired seeds each):
- * doing nothing and refusing every petition averages 74 (Tinderbox, 25 y) and 74 (First Season,
- * 30 y) — an A on v1.0's bands — and now earns a C; active stewardship averages 88 and 83.
+ * doing nothing and refusing every petition averages 74 (Tinderbox, 25 y, and First Season, 30 y)
+ * — an A on v1.0's bands — and now earns a C; active stewardship averages 88 and 83.
  */
 export const GRADES: Array<[number, string, string]> = [
   [90, 'S', 'Legend of the Valley'],

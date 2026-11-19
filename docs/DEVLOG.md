@@ -17,6 +17,7 @@ log; the milestone table reflects the current state.
 | M7 | Full UI: screens, HUD, panels, overlays, charts, tutorial, save/load | done |
 | M8 | Balancing via headless strategy simulations | done (first pass) |
 | M9 | QA, e2e, performance, docs, final build | done |
+| M10 | v1.1: remediation of the independent audit (see `REMEDIATION_REPORT.md`) | done |
 
 ## Log
 
@@ -82,18 +83,42 @@ log; the milestone table reflects the current state.
   then consumed the new houses as "planned". Units are now re-checked when lit, towns do not grow into
   pending units, and a regression test covers it. The burn tool now advises thinning beside homes.
 
+### v1.1 — remediation of the independent audit
+An adversarial audit of 1.0 (25 defects, plus calibration and agency findings) was answered in v1.1;
+`REMEDIATION_REPORT.md` maps every finding to its fix, test and measured effect. Lessons for whoever
+works on this next:
+- **Run other people's harnesses, not only your own.** My fire lab blew the wind along a grid axis;
+  the auditor's anisotropy harness blew it at 22.5° and found that v1.1's first elliptical spread
+  collapsed to a quarter of its speed between grid directions. Every landscape number measured before
+  that fix was wrong, including the burned-area figures I had used to judge the new spread.
+- **Fixing one bug can unmask another.** Once fires ran at their real speed in every direction, the
+  50-year runs exposed a deer forage term that never depleted (irruptions to ~100/km²) and knight moves
+  hopping rivers.
+- **Removing an imposed ceiling makes every food source matter.** Without the logistic K, the deer
+  population is set by what the model lets deer eat; cured grass in a snow-poor winter, valued at half
+  of fresh growth, let warm valleys carry ~50 deer/km². Winter grass is now a quarter of fresh value.
+- **Score with what the player controls.** After the ecology fixes an untended valley was healthier,
+  so v1.0's bands would have given doing nothing an A; the score had to change too.
+- The QA harnesses in `scripts/qa/` take any version's `src/sim`, so v1.0 and v1.1 can be compared
+  seed for seed.
+
 ## Known limitations
 
 - **Software-rendered tests**: frame rate was only measured under SwiftShader (≈10 fps at 1440×900);
   real GPUs are expected to be far faster. The only quality control is the render resolution (capped
   at 1.25× device pixels unless "Sharp rendering" is switched on); there is no adaptive scaling.
-- **Balancing is a first pass**: strategy bots show the intended ordering (steward > suppress ≈ passive
-  > timber baron) but weather luck still swings individual tenures substantially.
+- **Balancing**: in v1.1 strategy bots show steward > grant-all > passive ≈ suppress > timber baron on
+  the auditor's seeds, with the steward ahead on every paired seed; weather luck still swings
+  individual tenures substantially, and the grade bands are a design calibration on six seeds.
+- **Fire intensity** is still a load-and-dryness proxy, not Byram intensity from the v1.1 rates, and
+  some valleys (Boomtown in particular) see decade-long surges of grass fire with heavy home losses
+  under default management (see `REMEDIATION_REPORT.md`).
 - **Crews** walk the fire perimeter greedily; they do not plan indirect attack lines or burnouts.
 - **Smoke** is a 2D field with a simplified drift speed (kept on-map for legibility, not physical).
 - **Towns** are aggregates (population, homes), not individual agents.
 - **Hydrology** is daily and one-directional (no channel routing delays, no groundwater store beyond
-  soil moisture); floods are not simulated separately from debris flows.
+  soil moisture); the reservoir passes water downstream since v1.1, but floods are still not
+  simulated separately from debris flows.
 - **Phones** get a compact layout, pinch zoom and swipeable bars, checked only in headless Chromium at
   400 × 860. The game is designed for a larger screen with mouse and keyboard; on a phone the panels
   cover much of the map and painting with a finger is imprecise.

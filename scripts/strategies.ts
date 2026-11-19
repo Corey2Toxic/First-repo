@@ -22,7 +22,7 @@ import { evaluateLegacy } from '../src/sim/score.ts';
 import { DX8, DY8 } from '../src/sim/grid.ts';
 
 // passive: refuse every petition, do nothing else; grantall: grant every petition, nothing else
-type Strategy = 'passive' | 'grantall' | 'suppress' | 'steward' | 'baron';
+type Strategy = 'passive' | 'grantall' | 'suppress' | 'steward' | 'steward-nobuffer' | 'baron';
 const STRATS: Strategy[] = (process.env.FW_STRATS?.split(',') as Strategy[]) ?? ['passive', 'grantall', 'suppress', 'steward', 'baron'];
 
 function townDist(w: World) {
@@ -51,7 +51,7 @@ function blob(w: World, seed: number, size: number, ok: (i: number) => boolean):
   return out;
 }
 
-function stewardSetup(w: World): void {
+function stewardSetup(w: World, buffers = true): void {
   const td = townDist(w);
   const near = distanceField(w, (i) => w.L.town[i] > 0 || (w.L.infra[i] & INFRA.ROAD) !== 0, 40);
   const buffer: number[] = [],
@@ -61,7 +61,8 @@ function stewardSetup(w: World): void {
     if (td[i] <= 6) buffer.push(i);
     else if (near[i] >= 14 && w.L.elev[i] > 1900 && w.L.zone[i] === ZONE.NONE) wild.push(i);
   }
-  applyCommand(w, { t: 'zone', cells: buffer, zone: ZONE.BUFFER });
+  // steward-nobuffer: identical treatments, but the ring is never designated a Community Buffer
+  if (buffers) applyCommand(w, { t: 'zone', cells: buffer, zone: ZONE.BUFFER });
   applyCommand(w, { t: 'zone', cells: wild, zone: ZONE.WILDERNESS });
   applyCommand(w, { t: 'policy', key: 'buildingCode', value: 'firewise' });
   applyCommand(w, { t: 'policy', key: 'slash', value: 'pileburn' });
@@ -104,7 +105,7 @@ function play(seed: string, strat: Strategy, scen: ScenarioId, years: number) {
     applyCommand(w, { t: 'hire', kind: 'hand' });
     applyCommand(w, { t: 'hire', kind: 'heli' });
     applyCommand(w, { t: 'policy', key: 'fireBan', value: 'summer' });
-  } else if (strat === 'steward') stewardSetup(w);
+  } else if (strat === 'steward' || strat === 'steward-nobuffer') stewardSetup(w, strat === 'steward');
   else if (strat === 'baron') {
     applyCommand(w, { t: 'policy', key: 'harvest', value: 'high' });
     applyCommand(w, { t: 'policy', key: 'harvestMethod', value: 'clearcut' });
@@ -122,7 +123,7 @@ function play(seed: string, strat: Strategy, scen: ScenarioId, years: number) {
   const onReview = (ww: World) => {
     for (const p of ww.review.petitions) {
       let accept = false;
-      if (strat === 'steward') accept = p.faction === 'residents' || p.faction === 'conservation' || (p.action.type === 'policy' && p.faction === 'tourism');
+      if (strat === 'steward' || strat === 'steward-nobuffer') accept = p.faction === 'residents' || p.faction === 'conservation' || (p.action.type === 'policy' && p.faction === 'tourism');
       else if (strat === 'suppress') accept = p.faction !== 'conservation';
       else if (strat === 'baron') accept = p.faction === 'timber' || p.faction === 'ranchers';
       else if (strat === 'grantall') accept = true;
@@ -134,7 +135,7 @@ function play(seed: string, strat: Strategy, scen: ScenarioId, years: number) {
   };
   while (!w.outcome.ended && w.yearsElapsed < years + 0.01) {
     // seasonal bot actions
-    if (strat === 'steward') {
+    if (strat === 'steward' || strat === 'steward-nobuffer') {
       const reserve = 350_000;
       if (w.doy === 5 || w.doy === 185) stewardTreat(w, 'burn', Math.max(0, (w.economy.funds - reserve) * 0.35));
       if (w.doy === 280) stewardTreat(w, 'thin', Math.max(0, (w.economy.funds - reserve) * 0.6));

@@ -12,6 +12,14 @@ patchy and resilient. Every intervention echoes.
 It runs in any modern browser (WebGL 2). Everything you see — terrain, every tree crown, fire, smoke,
 herds — is simulated and procedurally rendered; there are no art assets.
 
+**Version 1.1** is a remediation release answering an independent audit of 1.0: burned houses no
+longer become fireproof, quitting to the title no longer breaks the app, the Community Buffer works,
+crews dispatch when fires are reported, grass fire runs at physical speeds, deer, wolves, beavers and
+bark beetles are mechanistic, the reservoir drains downstream, and the score rewards what the player
+does. What changed, why, the measurements before and after, and what is still wrong are in
+[`docs/REMEDIATION_REPORT.md`](docs/REMEDIATION_REPORT.md). Version 1.0 is preserved on the branch
+`backup/fireweed-v1.0.0-original`.
+
 ---
 
 ## Quick start
@@ -49,8 +57,11 @@ Headless tools used for balancing and QA:
 
 ```bash
 node scripts/sim-cli.ts --scenario tinderbox --years 30 --econ   # run decades headless, print yearly stats
-node scripts/strategies.ts tinderbox 25 seed-a seed-b            # four AI strategies, compared
+node scripts/strategies.ts tinderbox 25 seed-a seed-b            # five AI strategies, compared
 node scripts/fire-lab.ts                                         # fire behaviour under controlled weather
+node scripts/qa/firelab.ts [path/to/src/sim]                     # head/flank rates per fuel and wind
+node scripts/qa/driver.ts jobs.json outdir 4 [path/to/src/sim]   # decades-long runs, any version
+node scripts/qa/summarize.ts outdir                              # summary table of those runs
 node scripts/dump-map.ts <seed> <scenario> <outdir>              # PNG maps of a generated valley
 ```
 
@@ -71,8 +82,9 @@ node scripts/dump-map.ts <seed> <scenario> <outdir>              # PNG maps of a
    real grievances, and sets your budget. Unspent money mostly returns to the county. Trust below 30 at
    two reviews — or below 18 at one — ends your tenure.
 7. **Leave a legacy.** At the end of your tenure you are scored on homes kept safe, a living
-   community, how fire behaved, forest resilience, wildlife, diversity, clean water, finances and
-   trust, with an epilogue written from your valley's own history.
+   community, whether fire did its work, how safe the land around homes became, wildlife over the
+   whole tenure, diversity and old growth, clean water, finances and trust, with an epilogue written
+   from your valley's own history.
 
 ### Controls
 
@@ -115,12 +127,15 @@ A short tour (full detail in [`docs/DESIGN.md`](docs/DESIGN.md)):
 - **Vegetation**: grass, shrubs, aspen, pine and fir competing for light and water; succession (fir
   overtopping pine and aspen), clonal aspen suckering, seed rain, drought and senescence mortality,
   litter and dead-wood pools.
-- **Fire**: Rothermel-damped spread computed as stochastic minimum travel time (so a wind-driven fire can
-  run kilometres in an afternoon), crown-fire transitions through ladder fuels, ember spotting across
+- **Fire**: rates of spread by fuel type (CSIRO grassland model for cured grass, Rothermel-type shrub
+  and litter rates) on a wind ellipse, computed as stochastic minimum travel time (so a wind-driven
+  grass fire can run kilometres in an afternoon; see [`docs/FIRE_MODEL.md`](docs/FIRE_MODEL.md)),
+  crown-fire transitions through ladder fuels, ember spotting across
   barriers, smouldering overnight and flare-ups, structure ignition, burn severity and its ecological
   effects, smoke transport and valley inversions, detection by lookouts, residents and patrols.
-- **Wildlife**: migrating deer herds with density dependence, wolf packs that hunt, disperse, recolonise
-  and clash with ranchers, a "landscape of fear" that changes where deer browse, and beaver colonies
+- **Wildlife**: migrating deer herds that eat what they find (density dependence emerges from crowded
+  winter range — there is no carrying-capacity constant), territorial wolf packs that hunt, raise pups
+  in proportion to prey, disperse, recolonise and clash with ranchers, a "landscape of fear" that changes where deer browse, and beaver colonies
   whose ponds raise water tables, trap sediment, fill helicopter buckets and stop fires.
 - **Bark beetles** that erupt in drought-stressed, crowded pine after mild winters.
 - **People**: towns that grow into the forest, smoke exposure, firewise readiness, a sawmill that closes
@@ -147,7 +162,7 @@ src/ui/         Preact UI: HUD, inspector, panels, review, screens
 src/audio/      procedural ambience (WebAudio)
 tests/          Vitest suites (tests/sim) and the Playwright end-to-end run (tests/e2e)
 scripts/        headless CLI, strategy bots, fire lab, map dumps, screenshots, single-file build
-docs/           DESIGN, ARCHITECTURE, TESTING, DEVLOG
+docs/           DESIGN, ARCHITECTURE, TESTING, DEVLOG, FIRE_MODEL, REMEDIATION_REPORT
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for technical decisions,

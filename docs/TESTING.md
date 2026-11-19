@@ -8,10 +8,15 @@ How the game was verified, what each check covers, and what was found along the 
 
 | Suite | What it verifies |
 |---|---|
-| `tests/sim/fire.test.ts` | Rothermel damping is monotone; fire spreads farther downwind than upwind (aggregated over 8 stochastic runs); open water stops surface spread; wet fuels do not carry fire; crown fire kills fir while low-severity fire spares mature pine and turns killed trees into snags; ladder fuels produce crown fire that open stands do not; burnt cells are released when a fire ends; homes built inside a burn unit while it waited are cut out of it before it is lit, and a unit that was built over entirely is called off. |
+| `tests/sim/fire.test.ts` | (v1.1 additions: grass outruns pine litter and the ordering of fuels follows the literature; first-passage spread runs at the specified rate; a burned house's cell is released and a rebuilt house can burn again, also in a v1.0 save with a stuck cell; a road stops a light-wind grass fire more often than not; ground burned this season does not re-burn; a head fire runs about as far whatever the wind direction relative to the grid.) Rothermel damping is monotone; fire spreads farther downwind than upwind (aggregated over 8 stochastic runs); open water stops surface spread; wet fuels do not carry fire; crown fire kills fir while low-severity fire spares mature pine and turns killed trees into snags; ladder fuels produce crown fire that open stands do not; burnt cells are released when a fire ends; homes built inside a burn unit while it waited are cut out of it before it is lit, and a unit that was built over entirely is called off. |
 | `tests/sim/world.test.ts` | For several seeds: every cell drains to the map edge with non-increasing elevation (no sinks or loops); no NaN in any layer; canopy fractions ≤ 1; ≥ 2 towns with houses; a reservoir; named peaks; unique place names; roads; starting crews. Generation is deterministic per seed. Scenarios set up their signature conditions (After the Burn has a burn scar; Silent Woods has no wolves or beavers). |
 | `tests/sim/determinism.test.ts` | Two runs from the same seed produce identical state hashes after 200 days; a run with the same player command sequence replays identically; a game saved and reloaded at day 150 continues bit-for-bit like the original for another 120 days. |
-| `tests/sim/ecology.test.ts` | Without fire, fir gains on aspen over 20 years and fuel hazard does not fall (succession / fire exclusion); aspen clones resprout within two years after severe fire; with wolves, deer numbers and browse pressure are lower than without (trophic cascade, 12-year paired runs); bark beetles kill more pine after a mild winter than after a cold one. |
+| `tests/sim/ecology.test.ts` | Without fire, fir gains on aspen over 20 years and fuel hazard does not fall (succession / fire exclusion); aspen clones resprout within two years after severe fire; with wolves, deer numbers and browse pressure are lower than without (trophic cascade, paired runs); bark beetles erupt in drought-stressed old pine after mild winters, not cold ones; deer crowding one winter range end thinner; a founding beaver pair breeds; no ghost colonies; wolf density stays bounded by territory and prey with wolves present most years; planting adds a young cohort without resetting old trees; old growth is lost to stand-replacing disturbance, not to seedlings. |
+| `tests/sim/buffer.test.ts` | A wildfire that reaches a Community Buffer is always fought; crews go to a buffer fire before a larger fire elsewhere; only treated buffer raises the firewise rating, and it is kept treated at a cost. |
+| `tests/sim/water.test.ts` | A full reservoir passes its surplus down the river below the dam; the minimum release never drains storage on a dry day; sediment keeps arriving past 85 % silt. |
+| `tests/sim/score.test.ts` | A last-moment wolf release earns little wildlife credit; a valley with no fire earns nothing for fire doing its work; dredging at the end does not erase a silted record; no petitions at the final review; spending for its own sake is not rewarded. |
+| `tests/sim/economy.test.ts` | Campground petition builds a real campground; siting rules; visitor demand limits income; mill sizing, strain, reopening and survival under default play. |
+| `tests/sim/compat.test.ts` | A save written by the untouched v1.0 code loads, is repaired and plays on; imported policy values the game does not offer are reset. |
 | `tests/sim/society.test.ts` | The ledger accounts for every dollar; commands validate, apply and charge exactly (crew hire, zoning, roads refused into Wilderness, per-drop air-tanker cost, burns cost nothing until done, invalid commands have no side effects); petitions arise from real grievances (Silent Woods → conservationists ask for wolves); a warden below the trust threshold twice is dismissed with a scored legacy; **every scenario runs 30 years** with no non-finite values, bounded vegetation and approvals, and within a time budget. |
 | `tests/sim/review.test.ts` | The council review reports the reviewed year's income and spending (equal to the archived ledger, never $0k / $0k); year-end chronicle entries (drought, mill closure, petitions answered at the review) are filed under the closing year; "Keep playing" after the legacy report is a logged command that books any debt write-off as income, makes the skipped allocation and resets the low-trust count. |
 | `tests/sim/tutorial.test.ts` | The tutorial's lesson fire never comes in spring; it is lit by a validated, logged command on ground today's fire weather would carry, without doctoring fuel moisture; the notice names the real season and blames lightning only under a storm; it replays identically; it is refused outside the guided first season, off the map, or twice. |
@@ -41,6 +46,20 @@ error. Screenshots go to `test-results/phone/`.
 
 ## Headless tools used for QA and balancing
 
+v1.1 adds `scripts/qa/`, which runs against **any version's `src/sim`** so v1.0 and v1.1 can be compared
+on identical seeds:
+
+- `scripts/qa/longrun.ts` / `driver.ts` / `summarize.ts` — decades-long runs (parallel, resumable) with
+  yearly fire, homes, stuck-house, wildlife, vegetation, economy and politics rows, and a summary table.
+- `scripts/qa/firelab.ts` — head and flank rates per fuel and wind on uniform lab worlds (the table in
+  `FIRE_MODEL.md`).
+- `scripts/qa/perf.ts` — cost per simulated year and daily/month-boundary tick percentiles.
+- `scripts/strategies.ts` now has five bots (adds grant-every-petition) and `FW_SAVE_DIR`, which keeps
+  each final world so score formulas can be compared on identical end states.
+
+The auditor's harnesses (in the audit archive) were also re-run against v1.1 with their imports
+pointed at this tree; results are in `REMEDIATION_REPORT.md`.
+
 - `scripts/fire-lab.ts` — fire growth under four controlled weather regimes (moist spring, typical
   summer, dry and breezy, wind event) from six ignition points; used to calibrate spread rates.
 - `scripts/sim-cli.ts` — decades of simulation with yearly climate, burned area, severity, vegetation,
@@ -50,25 +69,26 @@ error. Screenshots go to `test-results/phone/`.
   fire that burned homes or more than 1,000 ha, with its cause and distance from town.
 - `scripts/playthrough.ts` — scripted browser session that saves screenshots of each stage.
 
-## Balancing results (Tinderbox, 25-year tenures, six seeds `bal-1`…`bal-6`)
+## Balancing results (v1.1; Tinderbox, 25-year tenures, the auditor's seeds `audit-r1`…`audit-r6`)
 
-| Strategy | Score mean (SD, worst) | Trust | Burned (ha) | Severe | Homes lost | Rx (ha) | Wolf packs |
-|---|---|---|---|---|---|---|---|
-| Steward (buffers, wilderness, burns 300 m+ from homes, thinning beside them, firewise) | **74** (5.9, 63) | 63 | 24,368 | 21 % | 4 | 1,710 | 2 |
-| Passive (defaults, auto-dispatch only) | 67 (8.3, 51) | 58 | 19,622 | 23 % | 5 | 0 | 2 |
-| Suppress everything (+2 hand crews, a helicopter, summer fire ban) | 66 (11.0, 50) | 60 | 20,087 | 20 % | 14 | 0 | 1 |
-| Timber baron (clearcut, salvage, heavy grazing, wolf bounty) | 56 (9.0, 43) | 55 | 24,237 | 24 % | 31 | 0 | 0 |
+| Strategy | Score mean (range) | Trust | Burned (ha) | Severe | Homes lost | Rx (ha) |
+|---|---|---|---|---|---|---|
+| Steward (buffers, wilderness, burns 300 m+ from homes, thinning beside them, firewise) | **88** (86–89) | 64 | 30,488 | 5 % | 1 | 5,492 |
+| Grant every petition | 79 (71–85) | 67 | 20,170 | 8 % | 16 | 0 |
+| Passive (defaults, auto-dispatch only, refuse petitions) | 74 (66–84) | 59 | 21,499 | 14 % | 16 | 0 |
+| Suppress everything (+2 hand crews, a helicopter, summer fire ban) | 74 (68–82) | 64 | 11,628 | 10 % | 15 | 0 |
+| Timber baron (clearcut, salvage, heavy grazing, wolf bounty) | 71 (60–75) | 56 | 14,452 | 8 % | 5 | 0 |
 
-The steward outscored the passive bot on all six seeds and had the best worst case. Suppressing
-everything is the most volatile strategy. It matched the steward on the two mildest seeds (77–78), but
-produced the lowest score of any non-baron run: on `bal-1` it burned 38,000 ha, lost 37 homes and ended
-in debt. The timber baron keeps the mill open on every seed but lost its wolves to the bounty every time
-and lost the most homes.
+First Season (30 years, same seeds): steward 83, grant every petition 76, passive 74. The steward
+beats every other strategy on all 6 paired seeds in both scenarios. v1.0's numbers on the same seeds
+(audit): suppress 71.5, steward 71.3, grant-all 70.8, passive 64.0, baron 59.8.
 
-Over 25 years the share of severe fire is similar across strategies (20–24 %). An earlier three-seed
-run, before the final wildlife, scoring and prescribed-burn changes, showed suppression with a much
-higher severe share (32 % vs 18 %). That result did not survive more seeds and is not claimed. Weather
-luck still moves a strategy's score by 16–28 points between its best and worst seed.
+In v1.1 suppressing everything does no better than doing nothing: extra crews keep fires smaller
+(11,600 vs 21,500 ha) but the fires that escape them still take homes. The timber baron's clearcuts
+lower fuel near towns, so it loses few homes, but the wolf bounty removes the wolves on every seed and
+deer rise to ~8,600 (2,000–2,800 under every other strategy). The steward's large burned area comes
+from monitored Wilderness fires, 95 % of it at low or moderate severity. (v1.0's balancing notes, on
+seeds `bal-1`…`bal-6`, are in the git history of this file.)
 
 ## Bugs found by testing (and fixed)
 
