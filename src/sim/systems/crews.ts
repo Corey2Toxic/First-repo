@@ -220,6 +220,9 @@ function nearestWater(w: World, x: number, y: number, maxR = 22): number {
 }
 
 function extinguish(w: World, i: number): void {
+  // a burning house is beyond a hose line or a bucket: cutting its burn time would only bring its
+  // loss forward (v1.0 did exactly that). Crews protect houses before they catch (structureProtection).
+  if (w.L.town[i] > 0) return;
   // cut the remaining burn time: the cell burns out next step at its current severity
   w.L.ftime[i] = Math.min(w.L.ftime[i], 0.01);
   w.L.fint[i] = Math.min(w.L.fint[i], 0.05);

@@ -15,6 +15,7 @@ import type { FireCause, FireEvent, FireResponse } from '../types.ts';
 import { cellFuel } from './fuels.ts';
 import type { CellFuel } from './fuels.ts';
 import { diurnal } from './climate.ts';
+import { loseStructure } from './towns.ts';
 import type { World } from '../world.ts';
 
 const HOURS = 24 / SUBSTEPS_PER_DAY;
@@ -575,20 +576,15 @@ function burnout(w: World, i: number, fe: FireEvent | undefined, hooks: FireStep
   L.fire[i] = FIRE.BURNT;
   if (L.town[i] > 0) {
     // a structure lost
-    const tid = L.town[i] - 1;
-    L.town[i] = -(tid + 1);
-    const t = w.towns[tid];
-    if (t) {
-      t.structures = Math.max(0, t.structures - 1);
-      t.lostStructures++;
-    }
-    w.counters.yearStructuresLost++;
-    w.counters.totalStructuresLost++;
+    const tid = loseStructure(w, i);
     if (fe) {
       fe.structuresLost++;
       if (hooks.onStructureLost) hooks.onStructureLost(tid, i, fe);
+    } else {
+      // no live fire owns this cell any more: nothing will release it, so do it now
+      L.fire[i] = FIRE.NONE;
+      L.fid[i] = -1;
     }
-    w.dirty.infra++;
     return;
   }
   // severity from the peak behaviour of this burn
@@ -599,6 +595,10 @@ function burnout(w: World, i: number, fe: FireEvent | undefined, hooks: FireStep
   if (fe) {
     if (sev === 3) fe.highSeverity++;
     else if (sev === 1) fe.lowSeverity++;
+  }
+  if (!fe) {
+    L.fire[i] = FIRE.NONE;
+    L.fid[i] = -1;
   }
   w.counters.yearBurned++;
   w.counters.totalBurned++;

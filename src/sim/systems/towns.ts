@@ -143,6 +143,28 @@ export function maintainBuffers(w: World): number {
   return n;
 }
 
+/**
+ * The one place a home is lost (fire or debris flow): town sign, counts, the valley's yearly and
+ * total losses and the town's own yearly loss all move together. v1.0 kept two copies of this and
+ * the debris-flow copy never reached the score, the yearly stats or the council's review (D14).
+ */
+export function loseStructure(w: World, i: number): number {
+  const L = w.L;
+  const tid = L.town[i] - 1;
+  if (tid < 0) return -1;
+  L.town[i] = -(tid + 1);
+  const t = w.towns[tid];
+  if (t) {
+    t.structures = Math.max(0, t.structures - 1);
+    t.lostStructures++;
+    t.yearLost = (t.yearLost ?? 0) + 1;
+  }
+  w.counters.yearStructuresLost++;
+  w.counters.totalStructuresLost++;
+  w.dirty.infra++;
+  return tid;
+}
+
 /** Yearly town growth, rebuilding and expansion into the forest edge. */
 export function townsYearly(w: World): void {
   const L = w.L;
@@ -152,13 +174,13 @@ export function townsYearly(w: World): void {
     // rebuild part of what burned
     const burnt: number[] = [];
     for (let i = 0; i < w.N; i++) if (L.town[i] === -(t.id + 1)) burnt.push(i);
+    // the town's own losses this year, measured before anything is rebuilt
+    const yearLost = t.yearLost ?? 0;
+    const before = t.structures + yearLost;
     for (const i of burnt) {
+      // a ruin still held by a burning fire waits until that fire is out and has released it
+      if (L.fire[i] !== FIRE.NONE) continue;
       if (r.next() < 0.55) {
-        // never rebuild on a cell a live fire still holds; clear any stale fire state so the
-        // new house can burn again (a BURNT cell is skipped by every spread path)
-        if (L.fire[i] === FIRE.BURNING) continue;
-        L.fire[i] = FIRE.NONE;
-        L.fid[i] = -1;
         L.town[i] = t.id + 1;
         t.structures++;
         w.spend('Other', 0);
@@ -170,7 +192,9 @@ export function townsYearly(w: World): void {
       Math.min(0.25, e.visitorsLastYear / 200000) +
       (w.policies.grazing === 'none' ? -0.03 : 0.03);
     const amen = (w.memory.scenic ?? 0.5) - 0.5;
-    const lost = t.lostStructures > 0 ? Math.min(0.3, (w.counters.yearStructuresLost / Math.max(1, t.structures)) * 0.5) : 0;
+    // people leave a town that burned this year, in proportion to its own losses (v1.0 charged any
+    // town that had ever lost a home with the whole valley's losses: up to -30 % for no loss, D17)
+    const lost = Math.min(0.3, (yearLost / Math.max(1, before)) * 0.5);
     const smoke = Math.min(0.03, t.smokeDays * 0.0008);
     const water = Math.min(0.02, w.counters.yearWaterShortDays * 0.0004);
     let g = 0.004 + 0.03 * (jobs - 0.5) + 0.012 * amen + 0.012 * t.growthPressure - lost - smoke - water;
@@ -180,6 +204,7 @@ export function townsYearly(w: World): void {
     const want = Math.ceil(t.population / 38);
     if (want > t.structures + burnt.length * 0.5) expandTown(w, t, want - t.structures);
     t.smokeDays = 0;
+    t.yearLost = 0;
   }
   // mill closure after years of short supply
   if (e.millOpen && e.millStrain >= 3) {

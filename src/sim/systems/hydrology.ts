@@ -6,8 +6,9 @@
  * town's water. Heavy rain on fresh burn scars can trigger debris flows.
  */
 import { clamp01 } from '../grid.ts';
-import { INFRA } from '../types.ts';
+import { FIRE, INFRA } from '../types.ts';
 import type { World } from '../world.ts';
+import { loseStructure } from './towns.ts';
 
 interface HydroCache {
   order: Int32Array; // upstream → downstream
@@ -121,13 +122,9 @@ export function hydrologyDaily(w: World, runoff: Float32Array, hooks: HydroHooks
     let damaged = 0;
     let cur = debris;
     for (let s = 0; s < 40 && cur >= 0; s++) {
-      if (L.town[cur] > 0) {
-        L.town[cur] = -L.town[cur];
-        const t = w.towns[-L.town[cur] - 1];
-        if (t) {
-          t.structures = Math.max(0, t.structures - 1);
-          t.lostStructures++;
-        }
+      // a burning house is already being counted by the fire; any other is buried
+      if (L.town[cur] > 0 && L.fire[cur] !== FIRE.BURNING) {
+        loseStructure(w, cur);
         damaged++;
       }
       if (L.infra[cur] & INFRA.ROAD) w.memory.roadsCut = (w.memory.roadsCut ?? 0) + 1;

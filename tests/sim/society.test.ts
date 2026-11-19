@@ -10,6 +10,10 @@ import type { LayerName } from '../../src/sim/world.ts';
 import { SCENARIOS } from '../../src/sim/scenarios.ts';
 import { startFire } from '../../src/sim/systems/fire.ts';
 import { cellFuel } from '../../src/sim/systems/fuels.ts';
+import { hydrologyDaily } from '../../src/sim/systems/hydrology.ts';
+import { townsYearly } from '../../src/sim/systems/towns.ts';
+import { evaluateLegacy } from '../../src/sim/score.ts';
+import { decodeWorld, encodeWorld } from '../../src/sim/save.ts';
 import { smallWorld } from '../helpers.ts';
 
 describe('economy, commands and politics', () => {
@@ -131,6 +135,63 @@ describe('economy, commands and politics', () => {
     sim.runDays(8);
     expect(pr.status).toBe('done'); // v1.0: stayed 'active' with nobody on it, forever
   }, 60000);
+
+  it('homes buried by a debris flow count as homes lost (D14)', () => {
+    const w = smallWorld('firstseason', 'd14-probe');
+    const L = w.L;
+    let i0 = -1;
+    for (let i = 0; i < w.N && i0 < 0; i++) {
+      if (L.water[i] || L.town[i]) continue;
+      let c = i,
+        ok = true;
+      for (let k = 0; k < 6; k++) {
+        c = L.flowTo[c];
+        if (c < 0 || L.water[c] || L.town[c]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) i0 = i;
+    }
+    const path: number[] = [];
+    for (let c = i0, k = 0; k < 40 && c >= 0; k++, c = L.flowTo[c]) path.push(c);
+    const t = w.towns[0];
+    L.town[path[3]] = t.id + 1;
+    t.structures++;
+    L.hydro.fill(0);
+    L.hydro[i0] = 0.8;
+    L.slope[i0] = 0.3;
+    L.grass[i0] = L.shrub[i0] = L.aspen[i0] = L.pine[i0] = L.fir[i0] = L.litter[i0] = 0;
+    w.weather.precip = 30;
+    const runoff = new Float32Array(w.N);
+    runoff[i0] = 50;
+    let damaged = -1;
+    hydrologyDaily(w, runoff, { onDebrisFlow: (_x: number, _y: number, d: number) => (damaged = d) });
+    expect(damaged).toBeGreaterThanOrEqual(1);
+    expect(L.town[path[3]]).toBeLessThan(0);
+    expect(w.counters.totalStructuresLost).toBe(damaged);
+    expect(w.counters.yearStructuresLost).toBe(damaged);
+    expect(w.towns.reduce((a, x) => a + x.lostStructures, 0)).toBe(w.counters.totalStructuresLost);
+    expect(evaluateLegacy(w, 'tenure').breakdown[0][1]).toBeLessThanOrEqual(15);
+  });
+
+  it("a town's growth is charged only for its own losses (D17)", () => {
+    const base = smallWorld('boomtown', 'd17-probe');
+    const bytes = encodeWorld(base);
+    const run = (earlierLoss: number, valleyLoss: number) => {
+      const w = decodeWorld(bytes);
+      const A = w.towns[0],
+        B = w.towns[w.towns.length - 1];
+      B.lostStructures = earlierLoss; // B lost homes in some earlier year
+      w.counters.yearStructuresLost = valleyLoss; // this year's losses are all in A
+      A.yearLost = valleyLoss;
+      const p0 = B.population;
+      townsYearly(w);
+      return B.population / p0;
+    };
+    for (const valley of [0, 5, 20]) expect(run(1, valley)).toBeCloseTo(run(0, valley), 6);
+    expect(run(1, 20)).toBeGreaterThan(0.95); // v1.0: -29 %
+  });
 
   it('petitions arise from real grievances', () => {
     const w = smallWorld('silentwoods', 'pet-1');

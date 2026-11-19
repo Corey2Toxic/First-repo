@@ -193,6 +193,8 @@ export interface Town {
   population: number;
   structures: number;
   lostStructures: number; // cumulative
+  /** homes this town lost this year (fire or debris) */
+  yearLost?: number;
   mill: boolean;
   station: number; // crew station cell
   /** firewise readiness 0..1 (codes + buffer treatments) */

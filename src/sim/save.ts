@@ -124,6 +124,10 @@ export function decodeWorld(bytes: Uint8Array): World {
   if (w.policies.smokeRules === undefined) w.policies.smokeRules = false;
   // v1.0 saves can hold burned houses that were never released (fireproof forever): repair them
   releaseOrphanFireCells(w);
+  // v1.0 did not count homes buried by debris flows in the valley total; every lost home is in
+  // some town's lostStructures, so the total can be restored exactly
+  const townLost = w.towns.reduce((a, t) => a + t.lostStructures, 0);
+  if (townLost > w.counters.totalStructuresLost) w.counters.totalStructuresLost = townLost;
   return w;
 }
 
