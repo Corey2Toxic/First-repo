@@ -13,6 +13,8 @@ import type { Crew, FireEvent, Project } from '../types.ts';
 import { COST, WORK } from '../economyParams.ts';
 import type { World } from '../world.ts';
 import { igniteProjectBurn, projectWorkCell, completeProjectCell, burnWindowOpen } from './projects.ts';
+import { cellFuel } from './fuels.ts';
+import type { CellFuel } from './fuels.ts';
 
 const HOURS = 24 / SUBSTEPS_PER_DAY;
 
@@ -20,6 +22,15 @@ export function isDayShift(w: World): boolean {
   return w.sub >= 2 && w.sub <= 5; // 06:00–18:00
 }
 
+/**
+ * Travel time in hours per 100 m cell. v1.0 moved engines at ~3 km/h on roads, hand crews at
+ * 50–140 m/h across country and helicopters at 6 km/h, so initial attack routinely arrived a day
+ * late. Reference speeds used now: engines and crew carriers ~30 km/h on mountain roads; engines
+ * crawl across gentle open ground (~3 km/h) and cannot climb steep ground; hand crews hike
+ * ~2.5 km/h on open level ground, slower uphill and through brush or young thickets; wading a
+ * river costs time. Helicopters fly (see `travel`).
+ */
+export const ROAD_HOURS_PER_CELL = 0.0035;
 function stepCost(w: World, kind: Crew['kind']) {
   const L = w.L;
   return (from: number, to: number, diag: boolean): number => {
@@ -27,14 +38,16 @@ function stepCost(w: World, kind: Crew['kind']) {
     if (L.fire[to] === FIRE.BURNING) return Infinity;
     const d = diag ? Math.SQRT2 : 1;
     const road = (L.infra[to] & INFRA.ROAD) !== 0 && (L.infra[from] & INFRA.ROAD) !== 0;
+    if (road) return ROAD_HOURS_PER_CELL * d;
     if (kind === 'engine') {
-      if (road) return 0.03 * d;
-      return d * 1.6 * (1 + 8 * L.slope[to]) + (L.flowAcc[to] > 1000 ? 2 : 0);
+      if (L.slope[to] > 0.35) return Infinity;
+      return d * 0.035 * (1 + 10 * L.slope[to]) * (1 + 0.8 * (L.shrub[to] + L.fir[to] + L.pine[to])) + (L.flowAcc[to] > 1000 ? 0.5 : 0);
     }
-    if (road) return 0.04 * d;
-    return d * 0.7 * (1 + 4 * L.slope[to]) * (1 + 0.3 * (L.shrub[to] + L.fir[to])) + (L.flowAcc[to] > 1000 ? 0.8 : 0);
+    return d * 0.04 * (1 + 5 * L.slope[to]) * (1 + 0.8 * (L.shrub[to] + L.fir[to])) + (L.flowAcc[to] > 1000 ? 0.3 : 0);
   };
 }
+/** Helicopter cruise speed, cells (100 m) per hour: ~160 km/h. */
+const HELI_SPEED = 1600;
 
 export function crewCell(w: World, c: Crew): number {
   const x = Math.max(0, Math.min(w.W - 1, Math.floor(c.x))),
@@ -53,7 +66,8 @@ export function planPath(w: World, c: Crew, goal: number): boolean {
     c.path = [];
     return true;
   }
-  const p = astar(w.W, w.H, start, goal, stepCost(w, c.kind), 0.03, 120000);
+  // heuristic scale = cheapest step (a road) keeps A* admissible, so crews really use roads
+  const p = astar(w.W, w.H, start, goal, stepCost(w, c.kind), ROAD_HOURS_PER_CELL, 160000);
   if (!p) return false;
   c.path = p;
   return true;
@@ -67,7 +81,7 @@ function travel(w: World, c: Crew, hours: number): number {
     const gx = (g % w.W) + 0.5,
       gy = ((g / w.W) | 0) + 0.5;
     const dist = Math.hypot(gx - c.x, gy - c.y);
-    const speed = 60; // cells/hour
+    const speed = HELI_SPEED;
     const t = dist / speed;
     if (t <= hours) {
       c.x = gx;
@@ -233,10 +247,17 @@ export function fireById(w: World, id: number): FireEvent | undefined {
   return undefined;
 }
 
+/**
+ * A crew taken off a treatment puts it back in the queue for the next free crew (v1.0 left it
+ * 'active' with nobody on it, so it was never picked up again). Burns being held are never left.
+ */
+export function releaseProject(w: World, c: Crew): void {
+  if (c.task?.kind !== 'project') return;
+  const pr = w.projects.find((p) => p.id === c.task!.projectId);
+  if (pr && (pr.status === 'active' || pr.status === 'waiting')) pr.status = 'queued';
+}
+
 export function assignToFire(w: World, c: Crew, fe: FireEvent, manual = false): boolean {
-  c.task = { kind: 'suppress', fireId: fe.id };
-  c.manual = manual;
-  c.workCell = -1;
   const cx = (fe.minX + fe.maxX) / 2,
     cy = (fe.minY + fe.maxY) / 2;
   let goal: number;
@@ -252,10 +273,14 @@ export function assignToFire(w: World, c: Crew, fe: FireEvent, manual = false): 
     goal = nearestPerimeter(w, fe, home % w.W, (home / w.W) | 0);
     if (goal < 0) goal = Math.round(cy) * w.W + Math.round(cx);
   }
-  if (!planPath(w, c, goal)) {
-    c.task = null;
-    return false;
-  }
+  // plan first: a crew that cannot reach the fire keeps whatever it was doing
+  if (!planPath(w, c, goal)) return false;
+  // a project left behind goes back in the queue for the next free crew (v1.0 left it 'active'
+  // with nobody on it, so it was never picked up again)
+  releaseProject(w, c);
+  c.task = { kind: 'suppress', fireId: fe.id };
+  c.manual = manual;
+  c.workCell = -1;
   c.state = 'moving';
   return true;
 }
@@ -311,7 +336,9 @@ export function autoDispatch(w: World): void {
   const assigned = (fe: FireEvent, kind?: Crew['kind']) =>
     w.crews.filter((c) => c.task?.fireId === fe.id && (!kind || c.kind === kind)).length;
   for (const c of w.crews) {
-    if (c.state !== 'idle' && !(c.task?.kind === 'project' && !c.manual)) continue;
+    // idle crews, crews heading home from a finished job, and crews on routine project work
+    const free = c.state === 'idle' || (c.state === 'returning' && !c.task) || (c.task?.kind === 'project' && !c.manual);
+    if (!free) continue;
     if (c.manual) continue;
     if (c.fatigue > 0.95) continue;
     for (const { fe, th } of scored) {
@@ -320,11 +347,8 @@ export function autoDispatch(w: World): void {
       const want = c.kind === 'hand' ? Math.min(4, 1 + Math.floor(Math.sqrt(fe.area) / 8)) : c.kind === 'engine' ? 2 : 1;
       if (assigned(fe, c.kind) >= want) continue;
       // projects yield to fires
-      if (c.task?.kind === 'project') {
-        const pr = w.projects.find((p) => p.id === c.task!.projectId);
-        if (pr && pr.status === 'burning') continue; // never abandon a burn in progress
-        if (pr) pr.status = 'queued';
-      }
+      const pr = c.task?.kind === 'project' ? w.projects.find((p) => p.id === c.task!.projectId) : undefined;
+      if (pr && pr.status === 'burning') continue; // never abandon a burn in progress
       if (assignToFire(w, c, fe)) break;
     }
   }
@@ -352,8 +376,24 @@ export interface CrewHooks {
   onBurnIgnited?: (pr: Project, fe: FireEvent) => void;
 }
 
+/**
+ * Initial attack: the dispatcher runs every sub-step while any reported fire is burning, so crews
+ * roll within the same 3-hour step a fire is reported (v1.0 dispatched only at midnight, a median
+ * 15 h after the report, and most fires were found mid-afternoon).
+ */
+function dispatchIfNeeded(w: World): void {
+  if (!w.policies.autoDispatch || w.burning.length === 0) return;
+  for (const fe of w.fires) {
+    if (fe.active && fe.detected && fe.response !== 'monitor' && fe.cause !== 'prescribed') {
+      autoDispatch(w);
+      return;
+    }
+  }
+}
+
 export function crewsSubstep(w: World, hooks: CrewHooks = {}): void {
   const day = isDayShift(w);
+  dispatchIfNeeded(w);
   for (const c of w.crews) {
     c.px = c.x;
     c.py = c.y;
@@ -414,44 +454,53 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
     if (hours <= 0.2) return;
   }
   c.state = 'working';
-  // night: ground crews hold position and rest; engines keep defending houses
-  if (!day && c.kind !== 'engine') return;
+  // night: helicopters are grounded; hand crews keep working a small fire through its first night
+  // (initial attack — the calm, damp night is the best time to hold it) but rest on large ones;
+  // engines keep defending houses
+  const initialAttack = fe.area <= 40 && c.fatigue < 0.75;
+  if (!day && c.kind === 'heli') return;
+  if (!day && c.kind === 'hand' && !initialAttack) return;
   if (c.kind === 'heli') return heliTick(w, c, fe, hours);
   chargeFire(w, fe, hours, c.kind);
   c.hoursWorked += hours;
   if (c.kind === 'engine') {
-    // direct attack on low-intensity fire within reach, protect houses (see structureProtection)
+    // direct attack on low-intensity fire within hose reach, protect houses (see structureProtection)
     let done = 0;
     const cx = Math.floor(c.x),
       cy = Math.floor(c.y);
-    for (let r = 1; r <= 3 && done < WORK.mopUp.engine; r++)
-      for (let dy = -r; dy <= r && done < WORK.mopUp.engine; dy++)
-        for (let dx = -r; dx <= r && done < WORK.mopUp.engine; dx++) {
+    const cap = WORK.mopUp.engine * (hours / HOURS);
+    for (let r = 0; r <= 3 && done < cap; r++)
+      for (let dy = -r; dy <= r && done < cap; dy++)
+        for (let dx = -r; dx <= r && done < cap; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
           const x = cx + dx,
             y = cy + dy;
           if (!w.inside(x, y)) continue;
           const i = y * w.W + x;
-          if (L.fire[i] === FIRE.BURNING && L.fint[i] < 0.6) {
+          if (L.fire[i] === FIRE.BURNING && L.fid[i] === fe.id && L.fint[i] < 0.6) {
             extinguish(w, i);
             done++;
           }
         }
-    // if the fire is no longer near houses or roads, find a better position
+    // nothing in reach: drive to the road nearest the fire's edge — unless holding a threatened town
     const th = fireThreat(w, fe);
-    if (th.dist > 18 && done === 0) {
-      const goal = nearestRoadTo(w, (fe.minX + fe.maxX) / 2, (fe.minY + fe.maxY) / 2);
+    if (done === 0 && th.dist > 6) {
+      const edge = nearestPerimeter(w, fe, c.x, c.y, 0.6);
+      const goal = edge >= 0 ? nearestRoadTo(w, edge % w.W, (edge / w.W) | 0) : nearestRoadTo(w, (fe.minX + fe.maxX) / 2, (fe.minY + fe.maxY) / 2);
       if (goal !== crewCell(w, c)) planPath(w, c, goal);
     }
     return;
   }
-  // hand crew: walk the perimeter cutting line, mop up behind
+  // hand crew: walk the perimeter cutting line, mop up behind. Line goes in fastest in grass
+  // (a scraped strip) and slowest through brush, young thickets and slash.
   const cx = c.x,
     cy = c.y;
-  let budget = WORK.lineCells.hand * (1 - 0.5 * c.fatigue) * (hours / HOURS);
+  let budget = WORK.lineCells.hand * (1 - 0.5 * c.fatigue) * (hours / HOURS) * (day ? 1 : 0.6);
+  let built = 0;
   let px = cx,
     py = cy;
   let guard = 0;
-  while (budget > 0 && guard++ < 20) {
+  while (budget > 0 && guard++ < 30) {
     const cand = localPerimeter(w, fe, px, py, 3).filter((p) => p.danger <= 0.85 && L.fline[p.cell] < 0.6);
     if (cand.length === 0) break;
     cand.sort((a, b) => {
@@ -463,7 +512,8 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
     L.fline[target] = 1;
     px = (target % w.W) + 0.5;
     py = ((target / w.W) | 0) + 0.5;
-    budget -= 1;
+    budget -= lineEffort(w, target);
+    built++;
     w.dirty.fire++;
   }
   // mop up smouldering edge cells next to line
@@ -482,7 +532,7 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
   c.x = px;
   c.y = py;
   // nothing workable nearby? relocate along the perimeter, or retreat from crown fire
-  if (budget === WORK.lineCells.hand * (1 - 0.5 * c.fatigue) * (hours / HOURS)) {
+  if (built === 0) {
     const near = localPerimeter(w, fe, cx, cy, 3);
     if (near.some((p) => p.danger > 0.85)) {
       if (hooks.onCrewRetreat) hooks.onCrewRetreat(c, fe);
@@ -496,6 +546,15 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
       if (crewCell(w, c) !== c.home) goHome(w, c);
     }
   }
+}
+
+/** Relative effort to cut one cell of line: ~0.45 in cured grass, 1 in litter, up to ~1.9 in heavy brush or slash. */
+const lineFuel: CellFuel = { fine: 0, grassShare: 0, ladder: 0, canopy: 0, heavy: 0, green: 0 };
+function lineEffort(w: World, i: number): number {
+  const L = w.L;
+  const f = cellFuel(w, i, lineFuel);
+  const heavy = clamp01(L.shrub[i] + L.slash[i] / 25 + 0.5 * L.fir[i] * (L.ageF[i] < 40 ? 1 : 0.3));
+  return 0.45 + 0.55 * (1 - f.grassShare) + 0.9 * heavy;
 }
 
 function heliTick(w: World, c: Crew, fe: FireEvent, hours: number): void {

@@ -8,6 +8,8 @@ import { ZONE, FACTIONS } from '../../src/sim/types.ts';
 import { LAYER_SPECS } from '../../src/sim/world.ts';
 import type { LayerName } from '../../src/sim/world.ts';
 import { SCENARIOS } from '../../src/sim/scenarios.ts';
+import { startFire } from '../../src/sim/systems/fire.ts';
+import { cellFuel } from '../../src/sim/systems/fuels.ts';
 import { smallWorld } from '../helpers.ts';
 
 describe('economy, commands and politics', () => {
@@ -82,6 +84,53 @@ describe('economy, commands and politics', () => {
     expect(applyCommand(w, { t: 'build', what: 'camp', cell: camp }).ok).toBe(false);
     expect(applyCommand(w, { t: 'build', what: 'camp', cell: camp + 1 }).ok).toBe(false);
   });
+
+  it('initial attack: crews roll in the step a fire is reported and reach it within hours (D3)', () => {
+    const w = smallWorld('firstseason', 'dispatch-1');
+    const sim = new Simulation(w, {}, { ignitions: false, autoReview: true });
+    sim.runDays(150); // midsummer
+    // a burnable cell 2–4 km from the first town
+    const t = w.towns[0];
+    let cell = -1;
+    for (let r = 20; r < 40 && cell < 0; r++)
+      for (let a = 0; a < 16 && cell < 0; a++) {
+        const x = Math.round(t.x + Math.cos(a) * r),
+          y = Math.round(t.y + Math.sin(a) * r);
+        if (!w.inside(x, y)) continue;
+        const i = y * w.W + x;
+        if (!w.L.water[i] && !w.L.town[i] && w.L.pond[i] < 0.1 && cellFuel(w, i).fine > 2) cell = i;
+      }
+    expect(cell).toBeGreaterThanOrEqual(0);
+    while (w.sub !== 4) sim.tick(); // mid-afternoon, when most fires are reported
+    const fe = startFire(w, cell, 'human')!;
+    fe.detected = true;
+    fe.detectedDay = w.day;
+    fe.response = 'suppress';
+    sim.tick();
+    expect(w.crews.some((c) => c.task?.fireId === fe.id)).toBe(true); // v1.0: not until midnight
+    let arrived = -1;
+    for (let k = 1; k <= 4 && arrived < 0 && fe.active; k++) {
+      sim.tick();
+      if (w.crews.some((c) => c.task?.fireId === fe.id && c.kind !== 'heli' && c.state === 'working')) arrived = k;
+    }
+    expect(fe.active === false || arrived > 0).toBe(true); // on the line within 12 hours (or already out)
+  }, 60000);
+
+  it('a crew pulled off a treatment puts the treatment back in the queue', () => {
+    const w = smallWorld('firstseason', 'requeue-1');
+    const t = w.towns[0];
+    const cells = Array.from({ length: 12 }, (_, k) => (t.y + 6) * w.W + t.x - 6 + k);
+    expect(applyCommand(w, { t: 'project', kind: 'thin', cells }).ok).toBe(true);
+    const sim = new Simulation(w, {}, { ignitions: false, autoReview: true });
+    sim.runDays(2);
+    const pr = w.projects[w.projects.length - 1];
+    const crew = w.crews.find((c) => c.task?.projectId === pr.id)!;
+    expect(crew).toBeTruthy();
+    expect(applyCommand(w, { t: 'recallCrew', crewId: crew.id }).ok).toBe(true);
+    expect(pr.status).toBe('queued');
+    sim.runDays(8);
+    expect(pr.status).toBe('done'); // v1.0: stayed 'active' with nobody on it, forever
+  }, 60000);
 
   it('petitions arise from real grievances', () => {
     const w = smallWorld('silentwoods', 'pet-1');

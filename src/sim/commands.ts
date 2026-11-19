@@ -8,7 +8,7 @@ import { FIRE, INFRA, SP, ZONE } from './types.ts';
 import type { CrewKind, FireResponse, Policies, ProjectKind } from './types.ts';
 import { COST, CREW_COST } from './economyParams.ts';
 import { cancelProject, createProject, zoneConflict } from './systems/projects.ts';
-import { assignToFire, crewCell, fireById, planPath } from './systems/crews.ts';
+import { assignToFire, crewCell, fireById, planPath, releaseProject } from './systems/crews.ts';
 import { makeCrew } from './gen/crews.ts';
 import { layRoad, roadCost } from './gen/settle.ts';
 import { beaverSiteScore } from './gen/wildlife.ts';
@@ -208,6 +208,8 @@ function apply(w: World, cmd: Command): CommandResult {
     case 'sendCrew': {
       const c = w.crews.find((x) => x.id === cmd.crewId);
       if (!c) return fail('No such crew.');
+      const held = c.task?.projectId !== undefined ? w.projects.find((p) => p.id === c.task!.projectId) : undefined;
+      if (held && held.status === 'burning') return fail(`${c.name} is holding a burn and cannot leave.`);
       if (cmd.fireId !== undefined) {
         const fe = fireById(w, cmd.fireId);
         if (!fe || !fe.active) return fail('That fire is out.');
@@ -221,6 +223,7 @@ function apply(w: World, cmd: Command): CommandResult {
         if (c.kind !== 'hand') return fail('Only hand crews carry out treatments.');
         const goal = Math.round(pr.cy) * w.W + Math.round(pr.cx);
         if (!planPath(w, c, goal)) return fail(`${c.name} cannot reach the project.`);
+        if (c.task?.projectId !== pr.id) releaseProject(w, c);
         c.task = { kind: 'project', projectId: pr.id };
         c.manual = true;
         c.state = 'moving';
@@ -228,6 +231,7 @@ function apply(w: World, cmd: Command): CommandResult {
       }
       if (cmd.cell !== undefined) {
         if (!planPath(w, c, cmd.cell)) return fail(`${c.name} cannot get there.`);
+        releaseProject(w, c);
         c.task = { kind: 'move', targetX: cmd.cell % w.W, targetY: (cmd.cell / w.W) | 0 };
         c.manual = true;
         c.state = 'moving';
@@ -240,6 +244,7 @@ function apply(w: World, cmd: Command): CommandResult {
       if (!c) return fail('No such crew.');
       const pr = c.task?.projectId !== undefined ? w.projects.find((p) => p.id === c.task!.projectId) : undefined;
       if (pr && pr.status === 'burning') return fail(`${c.name} is holding a burn and cannot leave.`);
+      releaseProject(w, c);
       c.task = null;
       c.manual = false;
       if (planPath(w, c, c.home)) c.state = 'returning';
@@ -254,12 +259,16 @@ function apply(w: World, cmd: Command): CommandResult {
         const first = cells[0];
         const fx = first % w.W,
           fy = (first / w.W) | 0;
-        const pool = w.crews.filter((x) => x.kind !== 'heli' && (x.state === 'idle' || (x.task?.kind === 'project' && !x.manual)));
+        const holdingBurn = (x: (typeof w.crews)[number]) => x.task?.kind === 'project' && w.projects.some((p) => p.id === x.task!.projectId && p.status === 'burning');
+        const pool = w.crews.filter((x) => x.kind !== 'heli' && (x.state === 'idle' || (x.task?.kind === 'project' && !x.manual && !holdingBurn(x))));
         pool.sort((a, b) => Math.hypot(a.x - fx, a.y - fy) - Math.hypot(b.x - fx, b.y - fy));
         c = pool[0];
       }
       if (!c) return fail('No ground crew is free. Recall one first.');
+      const held = c.task?.projectId !== undefined ? w.projects.find((p) => p.id === c.task!.projectId) : undefined;
+      if (held && held.status === 'burning') return fail(`${c.name} is holding a burn and cannot leave.`);
       if (!planPath(w, c, cells[0])) return fail(`${c.name} cannot reach the line.`);
+      releaseProject(w, c);
       c.task = { kind: 'line', cells };
       c.manual = true;
       c.state = 'moving';

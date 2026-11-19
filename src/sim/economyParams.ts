@@ -42,6 +42,6 @@ export const WORK = {
   thinCells: 1.2,
   plantCells: 3,
   breakCells: 1,
-  mopUp: { hand: 2, engine: 3, heli: 0 },
+  mopUp: { hand: 2, engine: 5, heli: 0 },
   drops: { near: 6, far: 3 },
 };
