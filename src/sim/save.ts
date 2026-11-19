@@ -9,9 +9,15 @@
 import { Rng } from './rng.ts';
 import { LAYER_SPECS, World } from './world.ts';
 import { releaseOrphanFireCells } from './systems/fire.ts';
+import { POLICY_VALUES } from './commands.ts';
 import type { LayerName, LayerType } from './world.ts';
 
-export const SAVE_VERSION = 3;
+/**
+ * 4 (v1.1): command log saved; nested state merged over defaults on load, so fields added in later
+ * versions get their defaults instead of `undefined`; invalid policies reset; orphaned fire cells
+ * released. Version 3 (v1.0) saves load unchanged otherwise.
+ */
+export const SAVE_VERSION = 4;
 
 const STATE_KEYS = [
   'day',
@@ -51,7 +57,11 @@ const STATE_KEYS = [
   'memory',
   'burning',
   'smokePresent',
+  'commandLog',
 ] as const;
+
+/** Object-valued state merged over the defaults of a fresh World on load. */
+const MERGED_KEYS = new Set(['weather', 'climate', 'economy', 'policies', 'counters', 'memory', 'review', 'outcome']);
 
 interface Header {
   magic: 'fireweed';
@@ -66,10 +76,10 @@ interface Header {
 const BYTES: Record<LayerType, number> = { f32: 4, i32: 4, u8: 1, i8: 1, u16: 2 };
 
 export function encodeWorld(w: World): Uint8Array {
-  // keep the fire list bounded: all active fires + the 400 most recent
-  const fires = w.fires.length > 400 ? [...w.fires.filter((f) => f.active), ...w.fires.filter((f) => !f.active).slice(-400)] : w.fires;
+  // a save is a pure serialisation: the fire list is kept bounded by the simulation itself
+  // (fire.ts pruneFires), so a reloaded world is identical to the live one (v1.0 trimmed here)
   const state: Record<string, unknown> = {};
-  for (const k of STATE_KEYS) state[k] = k === 'fires' ? fires : (w as unknown as Record<string, unknown>)[k];
+  for (const k of STATE_KEYS) state[k] = (w as unknown as Record<string, unknown>)[k];
   const rng: Header['rng'] = {};
   for (const [k, r] of Object.entries(w.rng)) rng[k] = (r as Rng).getState();
   const layers: Header['layers'] = [];
@@ -116,12 +126,25 @@ export function decodeWorld(bytes: Uint8Array): World {
     new Uint8Array(target.buffer, target.byteOffset, target.byteLength).set(src.subarray(0, target.byteLength));
   }
   const ww = w as unknown as Record<string, unknown>;
-  for (const k of STATE_KEYS) if (k in header.state) ww[k] = header.state[k];
+  for (const k of STATE_KEYS) {
+    if (!(k in header.state)) continue;
+    const v = header.state[k];
+    // v1.0 replaced nested objects wholesale, so any field added later loaded as undefined (and ++ on
+    // it gave NaN); merge saved values over the defaults instead
+    if (MERGED_KEYS.has(k) && v && typeof v === 'object' && !Array.isArray(v)) ww[k] = { ...(ww[k] as object), ...(v as object) };
+    else ww[k] = v;
+  }
+  // imported files are not trusted: a policy value the game does not offer is reset to its default
+  const defaults = new World(header.config).policies as unknown as Record<string, unknown>;
+  const pol = w.policies as unknown as Record<string, unknown>;
+  for (const key of Object.keys(pol)) {
+    const allowed = (POLICY_VALUES as Record<string, ReadonlyArray<unknown>>)[key];
+    if (!allowed) delete pol[key];
+    else if (!allowed.includes(pol[key])) pol[key] = defaults[key];
+  }
   for (const [k, s] of Object.entries(header.rng)) (w.rng as unknown as Record<string, Rng>)[k] = Rng.fromState(s);
   // bump dirty counters so renderers re-upload everything
   for (const k of Object.keys(w.dirty) as Array<keyof World['dirty']>) w.dirty[k] = 1000 + w.dirty[k];
-  // forward-compatible defaults
-  if (w.policies.smokeRules === undefined) w.policies.smokeRules = false;
   // v1.0 saves can hold burned houses that were never released (fireproof forever): repair them
   releaseOrphanFireCells(w);
   // v1.0 did not count homes buried by debris flows in the valley total; every lost home is in
@@ -158,15 +181,22 @@ export function stateHash(w: World): string {
     const u8 = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
     for (let i = 0; i < u8.length; i += 1) mix(u8[i]);
   }
+  // everything persisted that can steer the simulation (v1.0 hashed only part of it)
   const json = JSON.stringify({
     d: w.day,
     s: w.sub,
     h: w.herds,
     p: w.packs,
     c: w.crews,
-    f: w.fires.map((f) => [f.id, f.area, f.active]),
-    e: w.economy.funds,
+    f: w.fires.map((f) => [f.id, f.area, f.active, f.response]),
+    e: w.economy,
     fa: w.factions,
+    t: w.towns,
+    pr: w.projects,
+    co: w.colonies,
+    po: w.policies,
+    cn: w.counters,
+    r: Object.values(w.rng).map((x) => (x as Rng).getState()),
   });
   for (let i = 0; i < json.length; i++) mix(json.charCodeAt(i) & 255);
   return (h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0')).toUpperCase();

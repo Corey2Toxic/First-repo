@@ -780,7 +780,17 @@ function recordFireEnd(w: World, fe: FireEvent): void {
     m.largestWildfire = { name: fe.name, area: fe.area, startDay: fe.startDay, structuresLost: fe.structuresLost };
 }
 
+/** Keep every active fire and the 400 most recent finished ones, in order (bounded saves). */
+export function pruneFires(w: World): void {
+  let inactive = 0;
+  for (const f of w.fires) if (!f.active) inactive++;
+  if (inactive <= 450) return;
+  let drop = inactive - 400;
+  w.fires = w.fires.filter((f) => f.active || drop-- <= 0);
+}
+
 function updateFireEvents(w: World, hooks: FireStepHooks): void {
+  let pruned = false;
   const L = w.L;
   const counts = new Map<number, number>();
   for (const b of w.burning) counts.set(L.fid[b], (counts.get(L.fid[b]) ?? 0) + 1);
@@ -791,6 +801,7 @@ function updateFireEvents(w: World, hooks: FireStepHooks): void {
       fe.active = false;
       fe.outDay = w.day;
       recordFireEnd(w, fe);
+      pruned = true;
       // release burnt cells
       for (let y = fe.minY; y <= fe.maxY; y++)
         for (let x = fe.minX; x <= fe.maxX; x++) {
@@ -805,6 +816,7 @@ function updateFireEvents(w: World, hooks: FireStepHooks): void {
       fe.containment = containment(w, fe);
     }
   }
+  if (pruned) pruneFires(w);
 }
 
 /** Fraction of the active perimeter that is blocked by line, retardant or barriers. */

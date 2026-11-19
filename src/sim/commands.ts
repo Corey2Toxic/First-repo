@@ -53,7 +53,7 @@ const fail = (msg: string): CommandResult => ({ ok: false, msg });
 export function estimateCost(w: World, cmd: Command): number {
   switch (cmd.t) {
     case 'airdrop':
-      return Math.ceil(cmd.cells.length / 10) * COST.retardantDrop;
+      return Math.ceil(new Set(cmd.cells).size / 10) * COST.retardantDrop;
     case 'build':
       return cmd.what === 'tower' ? COST.tower : COST.camp;
     case 'hire':
@@ -171,8 +171,9 @@ export function applyCommand(w: World, cmd: Command): CommandResult {
   const invalid = validateCommand(w, cmd);
   if (invalid) return fail(invalid);
   const res = apply(w, cmd);
-  if (res.ok) w.commandLog.push({ day: w.day, sub: w.sub, cmd });
-  if (w.commandLog.length > 5000) w.commandLog.splice(0, w.commandLog.length - 5000);
+  // log a copy (the caller may reuse its object); the log is saved, so keep it bounded
+  if (res.ok) w.commandLog.push({ day: w.day, sub: w.sub, cmd: JSON.parse(JSON.stringify(cmd)) as Command });
+  if (w.commandLog.length > 2000) w.commandLog.splice(0, w.commandLog.length - 2000);
   return res;
 }
 
@@ -264,6 +265,8 @@ function apply(w: World, cmd: Command): CommandResult {
       const cells = cmd.cells.filter((i) => i >= 0 && i < w.N && L.water[i] < 2 && L.fire[i] !== FIRE.BURNING);
       if (cells.length === 0) return fail('Cannot cut line there.');
       let c = cmd.crewId !== undefined ? w.crews.find((x) => x.id === cmd.crewId) : undefined;
+      if (cmd.crewId !== undefined && !c) return fail('No such crew.');
+      if (c && c.kind === 'heli') return fail('Helicopters cannot cut fireline.');
       if (!c) {
         // nearest available hand crew (idle first, then busy on projects)
         const first = cells[0];
@@ -285,7 +288,8 @@ function apply(w: World, cmd: Command): CommandResult {
       return { ok: true, msg: `${c.name} cutting ${cells.length} cells of fireline.` };
     }
     case 'airdrop': {
-      const cells = cmd.cells.filter((i) => i >= 0 && i < w.N && L.water[i] < 2);
+      // each cell is paid for once (v1.0 charged repeated cells again)
+      const cells = [...new Set(cmd.cells)].filter((i) => i >= 0 && i < w.N && L.water[i] < 2);
       if (cells.length === 0) return fail('Nothing to drop on.');
       const drops = Math.ceil(cells.length / 10);
       const cost = drops * COST.retardantDrop;

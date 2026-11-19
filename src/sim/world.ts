@@ -609,14 +609,15 @@ export class World {
   }
 
   spend(category: string, amount: number): void {
-    if (amount <= 0) return;
+    // non-finite amounts never reach the ledger (v1.0: an invalid policy turned funds into NaN)
+    if (!(amount > 0) || !Number.isFinite(amount)) return;
     this.economy.funds -= amount;
     const e = this.economy.ledger.expense;
     e[category] = (e[category] ?? 0) + amount;
   }
 
   earn(category: string, amount: number): void {
-    if (amount <= 0) return;
+    if (!(amount > 0) || !Number.isFinite(amount)) return;
     this.economy.funds += amount;
     const inc = this.economy.ledger.income;
     inc[category] = (inc[category] ?? 0) + amount;

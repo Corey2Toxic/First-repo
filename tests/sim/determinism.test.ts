@@ -68,10 +68,10 @@ describe('determinism and persistence', () => {
     expect(w2.counters.nextId).toBe(next); // and consumed an entity id, changing the state hash
   });
 
-  it('tenure fire statistics survive the save trimming old fire records (D16)', () => {
+  it('tenure fire statistics stay exact when old fire records are trimmed (D16)', () => {
     const w = flatWorld(30, 30, { fm: 0.3 }); // too wet to spread: each fire burns one cell and goes out
     let k = 0;
-    for (let f = 0; f < 430; f++) {
+    for (let f = 0; f < 470; f++) {
       const i = (f % 28) + 1 + (((f / 28) | 0) % 28 + 1) * w.W;
       w.L.fire[i] = 0;
       w.L.fid[i] = -1;
@@ -80,13 +80,18 @@ describe('determinism and persistence', () => {
       for (let s = 0; s < 20 && fe.active; s++) fireSubstep(w);
       k++;
     }
+    // the simulation keeps the list bounded (the large early fire has been trimmed away)...
+    expect(w.fires.length).toBeLessThanOrEqual(450);
+    expect(w.fires.some((f) => f.area === 5000)).toBe(false);
+    // ...but the tenure's facts are running totals: exact, and identical after a reload
     const before = wildfireFacts(w);
-    expect(before.count).toBe(k);
-    expect(before.largest!.area).toBe(5000);
+    expect(before.count).toBe(k); // v1.0: the trimmed list's length (400)
+    expect(before.largest!.area).toBe(5000); // v1.0: the trimmed fire was forgotten
     const w2 = decodeWorld(encodeWorld(w));
-    expect(w2.fires.length).toBeLessThanOrEqual(400);
+    expect(w2.fires.length).toBe(w.fires.length); // a save is a pure serialisation now
+    expect(stateHash(w2)).toBe(stateHash(w));
     const after = wildfireFacts(w2);
-    expect(after.count).toBe(before.count); // v1.0: 400 after the reload
-    expect(after.largest!.area).toBe(5000); // v1.0: the trimmed fire was forgotten
+    expect(after.count).toBe(before.count);
+    expect(after.largest!.area).toBe(5000);
   });
 });
