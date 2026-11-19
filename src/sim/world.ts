@@ -370,7 +370,8 @@ export class World {
   dirty = { veg: 1, fire: 1, smoke: 1, zone: 1, infra: 1, water: 1, snow: 1 };
   /** Command log for replays/debugging */
   commandLog: Array<{ day: number; sub: number; cmd: unknown }> = [];
-  /** Running state hash from tests (not persisted) */
+  /** Set while sim endOfYear closes the books (not persisted; see record). */
+  closingYear = false;
 
   constructor(config: GameConfig) {
     this.config = config;
@@ -580,8 +581,14 @@ export class World {
     if (this.notifications.length > 200) this.notifications.splice(0, this.notifications.length - 200);
   }
 
+  /**
+   * Chronicle entries are filed by day. Year-end bookkeeping (sim endOfYear) and the council's
+   * review of the year run after the clock has rolled over to the new year; what they record
+   * belongs to the year being closed, which is where the review and the almanac look for it.
+   */
   record(kind: string, text: string, importance = 1, x?: number, y?: number): void {
-    this.chronicle.push({ day: this.day, kind, text, importance, x, y });
+    const day = (this.closingYear || this.review.pending) && this.day > 0 ? this.day - 1 : this.day;
+    this.chronicle.push({ day, kind, text, importance, x, y });
   }
 
   spend(category: string, amount: number): void {

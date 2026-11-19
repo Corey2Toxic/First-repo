@@ -179,6 +179,8 @@ export class Simulation {
 
   private endOfYear(): void {
     const w = this.w;
+    // the clock has already rolled over: what is recorded here belongs to the closing year
+    w.closingYear = true;
     const c = w.counters;
     const yr = w.year - 1;
     const s = w.stats;
@@ -224,6 +226,7 @@ export class Simulation {
     c.yearClosedDays = 0;
     w.memory.fireBanDays = 0;
     if (this.hooks.onNewYear) this.hooks.onNewYear(w);
+    w.closingYear = false;
     beginReview(w, closedLedger);
   }
 
