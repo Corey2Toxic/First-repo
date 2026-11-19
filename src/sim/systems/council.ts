@@ -14,7 +14,7 @@ import { hazardIndex } from './fuels.ts';
 import { dredge } from './hydrology.ts';
 import { COST } from '../economyParams.ts';
 import { NameBank } from '../gen/names.ts';
-import { distanceField } from '../gen/settle.ts';
+import { distanceField, timberExpansionCells } from '../gen/settle.ts';
 import { evaluateLegacy } from '../score.ts';
 import type { Command, CommandResult } from '../commands.ts';
 import type { World } from '../world.ts';
@@ -225,19 +225,49 @@ export function placeName(w: World, i: number): string {
 /** Share of last year's would-be visitors turned away for want of room above which tourism asks for a campground. */
 export const CAMP_PETITION_SHARE = 0.15;
 
+/** The last harvest ran short because the Timber zone had no more stands ready to cut (not because of the quota). */
+function stockLimited(w: World): boolean {
+  return !!w.memory.harvestStockLimited;
+}
+
+function timberShortfallCells(w: World): number[] {
+  const e = w.economy;
+  return timberExpansionCells(w, Math.max(0, e.millDemand - e.harvestLastYear), econCache(w).roadDist);
+}
+
 const TEMPLATES: PetitionTemplate[] = [
   {
     key: 'raise-harvest',
     faction: 'timber',
-    when: (w) => (w.economy.millOpen && w.policies.harvest !== 'high' && w.economy.harvestLastYear < 0.8 * w.economy.millDemand ? 1 : 0),
-    make: (w) => ({
-      title: 'Keep the mill running',
-      text: `The mill cut only ${Math.round((100 * w.economy.harvestLastYear) / w.economy.millDemand)}% of its log demand last year. Raise the harvest quota or the night shift goes.`,
-      action: { type: 'policy', key: 'harvest', value: w.policies.harvest === 'low' ? 'medium' : 'high' },
-      acceptDelta: 12,
-      declineDelta: -9,
-      sideEffects: [['conservation', -4]],
-    }),
+    when: (w) => {
+      const e = w.economy;
+      if (!e.millOpen || e.harvestLastYear >= 0.8 * e.millDemand) return 0;
+      // when the stands are exhausted a higher quota only hastens the closure: ask for more forest
+      if (stockLimited(w)) return timberShortfallCells(w).length > 0 ? 1 : 0;
+      return w.policies.harvest !== 'high' ? 1 : 0;
+    },
+    make: (w) => {
+      const pct = Math.round((100 * w.economy.harvestLastYear) / w.economy.millDemand);
+      if (stockLimited(w)) {
+        const cells = timberShortfallCells(w);
+        return {
+          title: 'Open more forest to the mill',
+          text: `The mill cut only ${pct}% of its log demand last year: every stand in the Timber zone that is ready to cut has been cut, and a higher quota will not make trees grow faster. Add ${cells.length} ha of roaded forest to the Timber zone or the night shift goes.`,
+          action: { type: 'zone', zone: ZONE.TIMBER, cells, label: 'Timber zone expansion' },
+          acceptDelta: 12,
+          declineDelta: -9,
+          sideEffects: [['conservation', -4]],
+        };
+      }
+      return {
+        title: 'Keep the mill running',
+        text: `The mill cut only ${pct}% of its log demand last year. Raise the harvest quota or the night shift goes.`,
+        action: { type: 'policy', key: 'harvest', value: w.policies.harvest === 'low' ? 'medium' : 'high' },
+        acceptDelta: 12,
+        declineDelta: -9,
+        sideEffects: [['conservation', -4]],
+      };
+    },
   },
   {
     key: 'salvage',

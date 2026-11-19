@@ -6,7 +6,7 @@
 import { clamp01, smoothstep } from '../grid.ts';
 import { FIRE, INFRA, ZONE } from '../types.ts';
 import { COST, CREW_COST, REVENUE } from '../economyParams.ts';
-import { distanceField } from '../gen/settle.ts';
+import { distanceField, millCeiling } from '../gen/settle.ts';
 import type { World } from '../world.ts';
 
 interface EconCache {
@@ -57,6 +57,18 @@ export function econCache(w: World): EconCache {
 
 export const GRAZE_LEVEL = { none: 0, light: 0.35, heavy: 0.7 } as const;
 export const HARVEST_FACTOR = { low: 0.5, medium: 1, high: 1.55 } as const;
+
+/** Timber harvest rules (shared with the mill sizing at world generation). */
+export const HARVEST = {
+  roadReach: 10, // cells from a road a stand can be logged
+  minVolume: 35, // t/ha below which a stand is not worth a sale
+  selectiveFrac: 0.35, // share of standing volume a selective cut takes
+  selectiveReentry: 15, // years before a selectively cut stand can be cut again
+  clearcutFrac: 0.92,
+  clearcutReentry: 60,
+} as const;
+/** A mill starved three years running closes (townsYearly); it can reopen this many years later if the stands have recovered. */
+export const MILL_REOPEN_YEARS = 3;
 
 export function dailyEconomy(w: World): void {
   const c = econCache(w);
@@ -259,28 +271,30 @@ export function timberHarvest(w: World): void {
   const e = w.economy;
   const c = econCache(w);
   const clearcut = w.policies.harvestMethod === 'clearcut';
-  const target = e.millOpen ? e.millDemand * HARVEST_FACTOR[w.policies.harvest] : 0;
-  const cands: Array<[number, number]> = [];
+  const frac = clearcut ? HARVEST.clearcutFrac : HARVEST.selectiveFrac;
+  const reentry = clearcut ? HARVEST.clearcutReentry : HARVEST.selectiveReentry;
+  // [sort value, cell, tonnes a cut would yield]
+  const cands: Array<[number, number, number]> = [];
+  let stock = 0;
   for (let i = 0; i < w.N; i++) {
-    if (L.zone[i] !== ZONE.TIMBER || c.roadDist[i] > 10 || L.fire[i] === FIRE.BURNING) continue;
+    if (L.zone[i] !== ZONE.TIMBER || c.roadDist[i] > HARVEST.roadReach || L.fire[i] === FIRE.BURNING) continue;
     const since = w.yearF - L.lastLogged[i];
-    if (since < (clearcut ? 60 : 15)) continue;
-    let v = timberVolume(w, i);
-    if (w.policies.salvage && w.yearF - L.lastBurn[i] < 2.5) v += L.snag[i] * 0.5;
-    if (w.policies.salvage) v += L.red[i] * 60;
-    if (v < 35) continue;
-    cands.push([v, i]);
+    if (since < reentry) continue;
+    const live = timberVolume(w, i);
+    const salv = w.policies.salvage ? (w.yearF - L.lastBurn[i] < 2.5 ? L.snag[i] * 0.5 : 0) + L.red[i] * 60 : 0;
+    const v = live + salv;
+    if (v < HARVEST.minVolume) continue;
+    cands.push([v, i, live * frac + salv]);
+    stock += live * frac + salv;
   }
   cands.sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  if (!e.millOpen) maybeReopenMill(w, stock);
+  const target = e.millOpen ? e.millDemand * HARVEST_FACTOR[w.policies.harvest] : 0;
   let got = 0;
   let cells = 0;
-  for (const [, i] of cands) {
+  for (const [, i, cut] of cands) {
     if (got >= target) break;
-    const frac = clearcut ? 0.92 : 0.35;
-    const live = timberVolume(w, i) * frac;
-    let salv = 0;
     if (w.policies.salvage) {
-      salv = (w.yearF - L.lastBurn[i] < 2.5 ? L.snag[i] * 0.5 : 0) + L.red[i] * 60;
       L.snag[i] *= 0.4;
       L.red[i] *= 0.3;
       L.hydro[i] = Math.max(L.hydro[i], 0.2);
@@ -296,18 +310,53 @@ export function timberHarvest(w: World): void {
     L.slash[i] += w.policies.slash === 'pileburn' ? slash * 0.25 : slash;
     if (w.policies.slash === 'pileburn') w.spend('Fuel treatments', COST.pileBurnPerHa);
     L.lastLogged[i] = w.yearF;
-    got += live + salv;
+    got += cut;
     cells++;
   }
-  e.harvestThisYear = got;
+  // add to (not overwrite) whatever else reached the mill this year
+  e.harvestThisYear += got;
   w.earn('Timber', got * REVENUE.timberStumpage * (e.timberPrice / 60));
   w.counters.yearHarvestCells = cells;
-  // the mill can only survive so many short years
+  // the quota could not be met because no more stands were ready to cut
+  w.memory.harvestStockLimited = e.millOpen && got < target;
+  // the mill can only survive so many short years in a row. A quota set below the mill's demand is
+  // a choice, not a shortage: the mill strains when it gets under 60 % of what the quota allows
+  // (v1.0 compared with full demand, so the 'low' quota (50 %) closed the mill in exactly 3 years,
+  // and counted net rather than consecutive short years)
   if (e.millOpen) {
-    if (got < 0.6 * e.millDemand) e.millStrain++;
-    else e.millStrain = Math.max(0, e.millStrain - 1);
+    const need = 0.6 * Math.min(target, e.millDemand);
+    if (got < need) e.millStrain++;
+    else e.millStrain = 0;
   }
   w.dirty.veg++;
+}
+
+/** Smallest mill worth reopening (t/yr). */
+export const MILL_MIN_VIABLE = 1000;
+
+/**
+ * A closed mill reopens (resized to what the Timber zone can now sustain) once it has stood idle
+ * for a few years and the stands ready to cut hold at least two years of its demand.
+ */
+function maybeReopenMill(w: World, stock: number): void {
+  const e = w.economy;
+  const m = w.memory;
+  if (w.year - (m.millClosedYear ?? w.year - MILL_REOPEN_YEARS) < MILL_REOPEN_YEARS) return;
+  const demand = sustainableMillDemand(millCeiling(w, econCache(w).roadDist));
+  if (demand < MILL_MIN_VIABLE || stock < 2 * demand) return;
+  e.millOpen = true;
+  e.millDemand = demand;
+  e.millStrain = 0;
+  m.millReopenedYear = w.year;
+  const mt = w.towns.find((t) => t.mill);
+  const where = mt ? ` in ${mt.name}` : '';
+  w.record('people', `The sawmill${where} reopened: the Timber zone has grown back enough to keep it in logs (${demand.toLocaleString()} t a year).`, 3, mt?.x, mt?.y);
+  w.notify(`The sawmill${where} has reopened.`, 'good', mt?.x, mt?.y);
+}
+
+/** A mill sized to run on 75 % of the zone's sustainable yield, in round hundreds of tonnes (max 9000). */
+export function sustainableMillDemand(ceiling: number): number {
+  return Math.round(Math.min(9000, 0.75 * ceiling) / 100) * 100;
 }
 
 function yearEndRevenue(w: World): void {

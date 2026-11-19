@@ -185,7 +185,7 @@ export interface EconomyState {
   visitorsThisYear: number;
   visitorsLastYear: number;
   millOpen: boolean;
-  millStrain: number; // consecutive years of shortfall
+  millStrain: number; // consecutive years of shortfall (reset by a good year)
 }
 
 export interface StatsSeries {
@@ -245,6 +245,9 @@ export interface WorldMemory {
   /** v1.0 only: set by the campground petition and never read. Kept so old saves type-check. */
   pendingCampground?: boolean;
   millClosedYear?: number;
+  millReopenedYear?: number;
+  /** The last harvest fell short of the quota because no more stands were ready to cut. */
+  harvestStockLimited?: boolean;
   /** This year so far: visitors who wanted to come, and those turned away for want of room. */
   visitDemand?: number;
   turnedAway?: number;

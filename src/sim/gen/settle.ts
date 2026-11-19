@@ -8,6 +8,7 @@ import { DX8, DY8, astar, clamp01 } from '../grid.ts';
 import { INFRA, ZONE } from '../types.ts';
 import type { Landmark, Town } from '../types.ts';
 import type { World } from '../world.ts';
+import { HARVEST, sustainableMillDemand, timberVolume } from '../systems/economy.ts';
 import type { TerrainInfo } from './terrain.ts';
 import type { NameBank } from './names.ts';
 
@@ -438,10 +439,68 @@ export function initialZones(w: World): void {
       L.zone[i] = ZONE.TIMBER;
     }
   }
-  // the mill was built to the size of the working forest (~2.4 t/ha/yr sustained yield)
-  let timber = 0;
-  for (let i = 0; i < w.N; i++) if (L.zone[i] === ZONE.TIMBER) timber++;
-  w.economy.millDemand = Math.round(Math.max(3500, Math.min(9000, timber * 2.4)) / 100) * 100;
+  // The mill was built to the size of the working forest: 75 % of what the Timber zone can yield on
+  // the 15-year selective rotation. v1.0 assumed 2.4 t/ha/yr (more than the rotation can give, about
+  // 2.1) with a 3500 t floor, so in First Season the mill ran out of logs and closed by year 8-15
+  // whatever the player did. A valley whose forest is too small for a working mill gets a bigger
+  // Timber zone instead of an oversized mill.
+  let ceiling = millCeiling(w, roadDist);
+  if (0.75 * ceiling < MILL_MIN_DEMAND) {
+    for (const i of timberExpansionCells(w, MILL_MIN_DEMAND - 0.75 * ceiling, roadDist)) L.zone[i] = ZONE.TIMBER;
+    ceiling = millCeiling(w, roadDist);
+  }
+  w.economy.millDemand = sustainableMillDemand(ceiling);
+}
+
+/** A working mill needs at least this much timber a year (t); smaller valleys zone more forest for it. */
+export const MILL_MIN_DEMAND = 1500;
+
+function roadDistance(w: World): Uint8Array {
+  return distanceField(w, (i) => (w.L.infra[i] & INFRA.ROAD) !== 0, 40);
+}
+
+/** Tonnes a year a stand yields when cut selectively on the re-entry rotation. */
+export function standYield(w: World, i: number): number {
+  return (HARVEST.selectiveFrac * timberVolume(w, i)) / HARVEST.selectiveReentry;
+}
+
+/**
+ * Sustainable yield ceiling of the Timber zone (t/yr): every stand the mill can reach (same rules as
+ * the harvest: road within reach, enough volume) cut selectively once per re-entry period.
+ */
+export function millCeiling(w: World, roadDist: Uint8Array = roadDistance(w)): number {
+  const L = w.L;
+  let s = 0;
+  for (let i = 0; i < w.N; i++) {
+    if (L.zone[i] !== ZONE.TIMBER || roadDist[i] > HARVEST.roadReach) continue;
+    if (timberVolume(w, i) >= HARVEST.minVolume) s += standYield(w, i);
+  }
+  return s;
+}
+
+/**
+ * Unzoned forest within the mill's reach (outside a 4-cell ring around towns, not too steep),
+ * nearest roads first, enough to add `tonnes` a year of sustainable mill demand.
+ */
+export function timberExpansionCells(w: World, tonnes: number, roadDist: Uint8Array = roadDistance(w)): number[] {
+  const L = w.L;
+  const townDist = distanceField(w, (i) => L.town[i] !== 0, 6);
+  const cands: Array<[number, number]> = [];
+  for (let i = 0; i < w.N; i++) {
+    if (L.zone[i] !== ZONE.NONE || L.water[i] || L.town[i] !== 0 || townDist[i] <= 4) continue;
+    if (roadDist[i] > HARVEST.roadReach || L.slope[i] >= 0.45) continue;
+    if (timberVolume(w, i) < HARVEST.minVolume) continue;
+    cands.push([roadDist[i], i]);
+  }
+  cands.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const out: number[] = [];
+  let added = 0;
+  for (const [, i] of cands) {
+    if (added >= tonnes) break;
+    out.push(i);
+    added += 0.75 * standYield(w, i);
+  }
+  return out;
 }
 
 export function nameLandmarks(w: World, names: NameBank, info: TerrainInfo): void {

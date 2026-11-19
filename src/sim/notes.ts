@@ -165,8 +165,8 @@ export const FIELD_NOTES: FieldNote[] = [
     id: 'mill-closure',
     title: 'When the mill closes',
     category: 'People',
-    body: 'A mill that cannot get logs for several years shuts down. Jobs leave, families follow, and the timber vote turns bitter — but the forest is spared the saw.',
-    tip: 'Thinning projects supply some wood and work without taking the big trees.',
+    body: 'A mill that goes short of logs three years running shuts down. Jobs leave, families follow, and the timber vote turns bitter — but the forest is spared the saw. If the stands grow back, a buyer may reopen it a few years later, sized to what the Timber zone can sustain.',
+    tip: 'Cut no faster than the Timber zone regrows. When the harvest falls short because every stand is freshly cut, a higher quota will not help — more Timber zone will. Thinning keeps loggers working, but its small wood goes to biomass, not to the mill.',
   },
   {
     id: 'snow-drought',
