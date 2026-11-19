@@ -34,10 +34,15 @@ const CAUSE_TEXT: Record<string, string> = {
 };
 
 export function makeEventHooks(w: World): SimHooks {
-  const told = new Set<string>();
+  // once-only notices are remembered in the world (and so in saves): v1.0 kept them in this closure,
+  // so a reloaded game repeated e.g. "…is crowning", consuming an entity id and changing the state
+  // hash although the dynamics were identical (D11). Old keys are pruned to keep saves small.
   const once = (key: string) => {
-    if (told.has(key)) return false;
-    told.add(key);
+    const told = (w.memory.told ??= {});
+    if (told[key] !== undefined) return false;
+    told[key] = w.day;
+    const keys = Object.keys(told);
+    if (keys.length > 300) for (const k of keys) if (w.day - told[k] > 360) delete told[k];
     return true;
   };
   return {

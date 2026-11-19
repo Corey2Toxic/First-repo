@@ -254,6 +254,12 @@ export interface WorldMemory {
   deerK?: number;
   returnedTotal?: number;
   allocTotal?: number;
+  /** once-only notices already given (key → day) */
+  told?: Record<string, number>;
+  /** wildfire statistics kept exactly even when old fire records are trimmed from saves */
+  wildfireCount?: number;
+  largestWildfire?: { name: string; area: number; startDay: number; structuresLost: number };
+  totalEscapes?: number;
 }
 
 export interface ReviewState {

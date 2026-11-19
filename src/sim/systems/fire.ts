@@ -658,6 +658,7 @@ function checkEscape(w: World, fe: FireEvent, cell: number, hooks: FireStepHooks
     fe.response = 'suppress';
     fe.name = fe.name.replace(/ Fire$/, ' Escape');
     w.counters.yearEscapes++;
+    w.memory.totalEscapes = (w.memory.totalEscapes ?? 0) + 1;
     if (hooks.onEscape) hooks.onEscape(fe);
   }
 }
@@ -766,6 +767,19 @@ export function applyFireEffects(w: World, i: number, sev: number): void {
 }
 
 // ---------------------------------------------------------------- events
+/**
+ * Tenure statistics kept as running totals, because saves keep only the 400 most recent finished
+ * fires: v1.0 derived the epilogue's wildfire count and largest fire from that trimmed list, so they
+ * changed after a reload in long tenures (D16).
+ */
+function recordFireEnd(w: World, fe: FireEvent): void {
+  if (fe.cause === 'prescribed' || fe.cause === 'pile') return;
+  const m = w.memory;
+  m.wildfireCount = (m.wildfireCount ?? 0) + 1;
+  if (!m.largestWildfire || fe.area > m.largestWildfire.area)
+    m.largestWildfire = { name: fe.name, area: fe.area, startDay: fe.startDay, structuresLost: fe.structuresLost };
+}
+
 function updateFireEvents(w: World, hooks: FireStepHooks): void {
   const L = w.L;
   const counts = new Map<number, number>();
@@ -776,6 +790,7 @@ function updateFireEvents(w: World, hooks: FireStepHooks): void {
     if (fe.burning === 0) {
       fe.active = false;
       fe.outDay = w.day;
+      recordFireEnd(w, fe);
       // release burnt cells
       for (let y = fe.minY; y <= fe.maxY; y++)
         for (let x = fe.minX; x <= fe.maxX; x++) {

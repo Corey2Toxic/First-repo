@@ -50,12 +50,18 @@ export function evaluateLegacy(w: World, reason: 'tenure' | 'dismissed' | 'bankr
   const startHz = m.startHazard ?? v.hazard;
   const resilience = 7 * clamp01(0.5 + (startHz - v.hazard) * 6);
   const deer = deerCount(w);
-  const wildlife =
-    (w.packs.length > 0 ? 4 : 0) + Math.min(3, w.colonies.filter((c) => c.active).length * 0.75) + (deer > 250 && deer < 1300 ? 2 : 0);
+  // a healthy herd: 1–10 deer per km² (map-size independent) in fair condition. v1.0 used a fixed
+  // 250–1,300 deer, i.e. 24 % of carrying capacity on large maps and 65 % on small ones (D15)
+  const km2 = v.land / 100;
+  let condSum = 0;
+  for (const h of w.herds) condSum += h.cond * h.n;
+  const density = deer / Math.max(1, km2);
+  const healthyHerd = density >= 1 && density <= 10 && (deer ? condSum / deer : 0) >= 0.45;
+  const wildlife = (w.packs.length > 0 ? 4 : 0) + Math.min(3, w.colonies.filter((c) => c.active).length * 0.75) + (healthyHerd ? 2 : 0);
   const diversity = 6 * clamp01(shannon([v.grass, v.shrub, v.aspen, v.pine, v.fir]) * 1.15);
   breakdown.push(['Fire doing its work', regime, `${burned.toLocaleString()} ha burned, ${Math.round(100 * (1 - lowShare))}% at high severity`]);
   breakdown.push(['A resilient forest', resilience, `fuel hazard ${(startHz * 100).toFixed(0)} → ${(v.hazard * 100).toFixed(0)}`]);
-  breakdown.push(['Wild things', wildlife, `${w.packs.length} wolf packs, ${w.colonies.filter((c) => c.active).length} beaver colonies, ${deer} deer`]);
+  breakdown.push(['Wild things', wildlife, `${w.packs.length} wolf packs, ${w.colonies.filter((c) => c.active).length} beaver colonies, ${deer} deer (${density.toFixed(1)}/km²${healthyHerd ? ', healthy' : ''})`]);
   breakdown.push(['A diverse landscape', diversity, `aspen ${(v.aspen * 100).toFixed(1)}%, pine ${(v.pine * 100).toFixed(0)}%, fir ${(v.fir * 100).toFixed(0)}% cover`]);
 
   // watershed (10)
@@ -92,20 +98,33 @@ export function evaluateLegacy(w: World, reason: 'tenure' | 'dismissed' | 'bankr
   };
 }
 
+/** Wildfire count and largest fire of the tenure, exact even after saves trimmed old fire records. */
+export function wildfireFacts(w: World): { count: number; largest: { name: string; area: number; startDay: number; structuresLost: number } | null } {
+  const wild = w.fires.filter((f) => f.cause !== 'prescribed' && f.cause !== 'pile');
+  const finished = wild.filter((f) => !f.active);
+  const active = wild.length - finished.length;
+  // saves from v1.0 have no running totals: fall back to what the (possibly trimmed) list holds
+  const count = Math.max(w.memory.wildfireCount ?? 0, finished.length) + active;
+  let largest = w.memory.largestWildfire ?? null;
+  for (const f of finished) if (!largest || f.area > largest.area) largest = { name: f.name, area: f.area, startDay: f.startDay, structuresLost: f.structuresLost };
+  return { count, largest };
+}
+
 function epilogue(w: World, reason: string, years: number, v: ReturnType<typeof vegetationSummary>): string[] {
   const out: string[] = [];
   const name = w.valleyName;
   if (reason === 'tenure') out.push(`You served ${years} years as warden of ${name}, and handed the keys to your successor on your own terms.`);
   else if (reason === 'bankrupt') out.push(`After ${years} years the council placed the Stewardship Service in receivership. The ledgers did not survive you.`);
   else out.push(`After ${years} years the council voted to dismiss you. The valley will remember some of it fondly.`);
-  const fires = w.fires.filter((f) => !f.active && f.cause !== 'prescribed').sort((a, b) => b.area - a.area);
-  if (fires.length) {
-    const big = fires[0];
+  const { count, largest } = wildfireFacts(w);
+  if (largest) {
     out.push(
-      `${w.fires.filter((f) => f.cause !== 'prescribed').length} wildfires burned on your watch. The largest, the ${big.name} of year ${Math.floor(big.startDay / 360) + 1}, covered ${big.area.toLocaleString()} ha${big.structuresLost ? ` and took ${big.structuresLost} homes` : ''}.`,
+      `${count} wildfires burned on your watch. The largest, the ${largest.name} of year ${Math.floor(largest.startDay / 360) + 1}, covered ${largest.area.toLocaleString()} ha${largest.structuresLost ? ` and took ${largest.structuresLost} homes` : ''}.`,
     );
   }
-  if (w.counters.totalRx > 0) out.push(`Your crews lit ${w.counters.totalRx.toLocaleString()} ha of prescribed fire${w.counters.yearEscapes ? ', not all of it according to plan' : ''}.`);
+  // v1.0 read this year's escape counter after it had been reset, so escapes were never mentioned (D16)
+  const escapes = w.memory.totalEscapes ?? 0;
+  if (w.counters.totalRx > 0) out.push(`Your crews lit ${w.counters.totalRx.toLocaleString()} ha of prescribed fire${escapes ? `, and ${escapes === 1 ? 'one burn' : `${escapes} burns`} got away` : ''}.`);
   if (w.packs.length) out.push(`${w.packs.length} wolf pack${w.packs.length > 1 ? 's' : ''} — ${w.packs.map((p) => `the ${p.name}`).join(', ')} — still ${w.packs.length > 1 ? 'roam' : 'roams'} the valley.`);
   else out.push('No wolves remain in the valley.');
   const beavers = w.colonies.filter((c) => c.active).length;
