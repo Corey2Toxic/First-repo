@@ -13,7 +13,7 @@ import { ledgerTotals } from '../sim/systems/economy.ts';
 import { FIELD_NOTES } from '../sim/notes.ts';
 import { approvalColor, dayToDate, ha, money, pct } from './format.ts';
 import { BarChart, LineChart } from './charts.tsx';
-import { exportFile, importFile, listSlots, loadSlot, saveToSlot } from '../app/storage.ts';
+import { canDownload, exportFile, importFile, listSlots, loadSlot, saveToSlot } from '../app/storage.ts';
 import type { SlotInfo } from '../app/storage.ts';
 import type { World } from '../sim/world.ts';
 
@@ -539,6 +539,7 @@ function MenuPanel({ s, onLoad, onQuit }: { s: GameSession; onLoad: (w: World) =
         checked={set[k]}
         onChange={(e) => {
           s.settings = { ...s.settings, [k]: (e.target as HTMLInputElement).checked };
+          if (k === 'sharp') s.resize();
           s.emit();
         }}
       />
@@ -553,9 +554,11 @@ function MenuPanel({ s, onLoad, onQuit }: { s: GameSession; onLoad: (w: World) =
           <button class="btn primary" onClick={() => saveToSlot(s.world, 'manual').then(() => (setMsg('Saved.'), refresh())).catch((e) => setMsg(String(e)))}>
             Save game
           </button>
-          <button class="btn" onClick={() => exportFile(s.world)}>
-            Export file…
-          </button>
+          {canDownload() ? (
+            <button class="btn" onClick={() => exportFile(s.world)}>
+              Export file…
+            </button>
+          ) : null}
           <label class="btn">
             Import file…
             <input
@@ -593,6 +596,7 @@ function MenuPanel({ s, onLoad, onQuit }: { s: GameSession; onLoad: (w: World) =
         {toggle('wildlife', 'Show wildlife on the map')}
         {toggle('contours', 'Contour lines')}
         {toggle('audio', 'Ambient sound (wind, fire, birds)')}
+        {toggle('sharp', 'Sharp rendering on high-DPI screens (more GPU work)')}
         {toggle('reveal', 'Reveal undetected fires (spoiler)')}
       </div>
       <div>

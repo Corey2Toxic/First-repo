@@ -39,7 +39,11 @@ body {
 }
 #app {
   position: fixed;
-  inset: 0;
+  /* clear phone system bars when the page is shown edge to edge */
+  top: env(safe-area-inset-top, 0px);
+  bottom: env(safe-area-inset-bottom, 0px);
+  left: env(safe-area-inset-left, 0px);
+  right: env(safe-area-inset-right, 0px);
 }
 #map,
 #overlay {
@@ -394,10 +398,17 @@ h4 {
 }
 
 /* ---------------- lens bar ---------------- */
-.lensbar {
+.lenswrap {
   position: absolute;
   top: 74px;
   right: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 420px;
+}
+.lensbar {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -424,9 +435,6 @@ h4 {
   background: rgba(232, 116, 59, 0.12);
 }
 .legend {
-  position: absolute;
-  top: 118px;
-  right: 10px;
   width: 260px;
   padding: 10px 12px;
 }

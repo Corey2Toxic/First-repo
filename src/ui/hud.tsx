@@ -357,7 +357,7 @@ export function ToolFlyout({ s }: { s: GameSession }) {
 export function LensBar({ s }: { s: GameSession }) {
   const info = LENSES.find((l) => l.id === s.lens)!;
   return (
-    <>
+    <div class="lenswrap">
       <div class="lensbar panel">
         {LENSES.map((l) => (
           <button id={'lens-' + l.id} class={(s.lens === l.id ? 'on' : '') + (s.advisor.card?.highlight === 'lens-' + l.id ? ' pulse' : '')} onClick={() => s.setLens(l.id)} title={l.description}>
@@ -380,7 +380,7 @@ export function LensBar({ s }: { s: GameSession }) {
           ))}
         </div>
       ) : null}
-    </>
+    </div>
   );
 }
 

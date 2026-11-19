@@ -66,8 +66,10 @@ export function makeEventHooks(w: World): SimHooks {
     onStructureLost(townId: number, cell: number, fe: FireEvent) {
       const t = w.towns[townId];
       w.memory.recentLoss = (w.memory.recentLoss ?? 0) + 1;
-      shock(w, 'residents', -1.4, 'Homes lost to fire');
-      shock(w, 'tourism', -0.3);
+      // each lost home hurts, with diminishing returns within one fire
+      shock(w, 'residents', -2.4 / (1 + fe.structuresLost / 12), 'Homes lost to fire');
+      shock(w, 'tourism', -0.4 / (1 + fe.structuresLost / 12));
+      shock(w, 'conservation', -0.15);
       if (once(`loss${fe.id}:${w.day}`)) w.notify(`Homes are burning in ${t?.name ?? 'town'}! (${fe.name})`, 'danger', cell % w.W, (cell / w.W) | 0, fe.id);
       discover(w, 'wui');
     },
@@ -145,6 +147,11 @@ export function makeEventHooks(w: World): SimHooks {
       if (once('wk' + w.month + ':' + w.year)) w.notify(`${n} wolf${n > 1 ? 'ves' : ''} of the ${p.name} shot under the current wolf policy.`, 'info', Math.floor(p.x), Math.floor(p.y));
     },
     onPackFormed(p, parent) {
+      if (p === parent) {
+        w.record('wildlife', `A pair of wolves wandered into the valley from the mountains beyond: the ${p.name}.`, 3, Math.floor(p.tx), Math.floor(p.ty));
+        w.notify(`Wolves have returned to the valley on their own: the ${p.name}.`, 'good', Math.floor(p.x), Math.floor(p.y));
+        return;
+      }
       w.record('wildlife', `Young wolves from the ${parent.name} founded a new pack: the ${p.name}.`, 2, Math.floor(p.tx), Math.floor(p.ty));
       w.notify(`A new wolf pack, the ${p.name}, has formed.`, 'good', Math.floor(p.tx), Math.floor(p.ty));
     },

@@ -133,12 +133,25 @@ function updateHerd(w: World, h: Herd): void {
   }
 }
 
+/** Deer the valley can feed: forage summed over the land (sampled). */
+export function deerCapacity(w: World): number {
+  let f = 0;
+  for (let i = 0; i < w.N; i += 3) if (!w.L.water[i] && !w.L.town[i]) f += forage(w, i);
+  return Math.max(50, f * 3 * 0.19);
+}
+
 function herdsMonthly(w: World): void {
   const r = w.rng.wildlife;
   const month = w.month;
+  // density dependence: crowded herds raise fewer fawns and starve more
+  let total = 0;
+  for (const h of w.herds) total += h.n;
+  const K = w.month === 2 || w.month === 10 ? deerCapacity(w) : (w.memory.deerK ?? deerCapacity(w));
+  w.memory.deerK = K;
+  const crowd = total / K;
   for (const h of w.herds) {
-    if (month === 2) h.n += Math.round(h.n * 0.5 * smoothstep(0.2, 0.7, h.cond)); // fawning
-    let deaths = h.n * 0.006;
+    if (month === 2) h.n += Math.round(h.n * 0.5 * smoothstep(0.2, 0.7, h.cond) * Math.max(0, 1 - crowd * 0.85)); // fawning
+    let deaths = h.n * 0.006 + h.n * 0.05 * Math.max(0, crowd - 0.95);
     if (h.cond < 0.2) deaths += h.n * 0.08 * (1 - h.cond / 0.2);
     h.n = Math.max(0, h.n - Math.round(deaths + r.next() * 0.5));
     if (month === 8) {
@@ -179,7 +192,8 @@ function updatePack(w: World, p: Pack, hooks: WildlifeHooks): void {
   const r = w.rng.wildlife;
   p.px = p.x;
   p.py = p.y;
-  p.hunger = Math.min(2, p.hunger + 0.11);
+  // bigger packs need more food
+  p.hunger = Math.min(2, p.hunger + 0.025 + 0.018 * p.n);
   let tx = p.tx + r.range(-14, 14),
     ty = p.ty + r.range(-14, 14);
   let speed = 3.5;
@@ -229,7 +243,10 @@ function updatePack(w: World, p: Pack, hooks: WildlifeHooks): void {
     const best = w.herds.find((h) => h.id === p.targetHerd);
     if (best && Math.hypot(best.x - p.x, best.y - p.y) < 2.5) {
       const snow = L.snow[Math.floor(best.y) * w.W + Math.floor(best.x)];
-      const pSuccess = 0.33 * Math.sqrt(p.n / 5) * (0.6 + 0.8 * (1 - best.cond)) * (snow > 60 ? 1.4 : 1);
+      // type II functional response: scarce, wary prey is hard to find and corner
+      const density = w.memory.deerK ? deerTotal(w) / w.memory.deerK : 0.5;
+      const scarcity = smoothstep(0.02, 0.32, density);
+      const pSuccess = 0.33 * Math.sqrt(p.n / 5) * (0.6 + 0.8 * (1 - best.cond)) * (snow > 60 ? 1.4 : 1) * (0.25 + 0.75 * scarcity);
       if (r.next() < pSuccess) {
         const k = p.n >= 8 && best.n > 3 ? 2 : 1;
         best.n = Math.max(0, best.n - k);
@@ -273,7 +290,7 @@ function updatePack(w: World, p: Pack, hooks: WildlifeHooks): void {
       w.memory.lastDepredationDay = w.day;
       p.hunger = Math.max(0, p.hunger - 0.8);
       if (hooks.onDepredation) hooks.onDepredation(p);
-      if (w.policies.wolfPolicy !== 'protected' && (w.policies.wolfPolicy === 'bounty' || r.next() < 0.5)) {
+      if (w.policies.wolfPolicy !== 'protected' && (w.policies.wolfPolicy === 'bounty' || r.next() < 0.3)) {
         const k = w.policies.wolfPolicy === 'bounty' ? 2 : 1;
         const killed = Math.min(p.n, k);
         p.n -= killed;
@@ -289,7 +306,9 @@ function packsMonthly(w: World, hooks: WildlifeHooks): void {
   const names = new NameBank(w.rng.wildlife.fork('packnames' + w.day));
   const born: Pack[] = [];
   for (const p of w.packs) {
-    if (w.month === 2 && p.hunger < 1.2 && p.n < 12) p.n += r.intRange(2, 4);
+    const preyRatio = w.memory.deerK ? deerTotal(w) / w.memory.deerK : 0.5;
+    const preyRich = preyRatio > 0.18;
+    if (w.month === 2 && p.hunger < 0.9 && p.n < 12 && preyRich) p.n += r.intRange(1, 4);
     if (r.next() < 0.04 * (p.n / 5)) p.n -= 1; // natural mortality
     if (p.hunger > 1.8 && r.next() < 0.35) p.n -= 1; // starvation
     if (w.policies.wolfPolicy === 'bounty' && r.next() < 0.45) {
@@ -298,7 +317,7 @@ function packsMonthly(w: World, hooks: WildlifeHooks): void {
       if (hooks.onWolvesKilled) hooks.onWolvesKilled(p, 1);
     }
     // dispersal: young wolves found new packs where there is room
-    if (p.n >= 9 && w.month >= 6 && w.month <= 9) {
+    if (p.n >= 9 && w.month >= 6 && w.month <= 9 && preyRatio > 0.3) {
       for (let k = 0; k < 40; k++) {
         const ang = r.range(0, Math.PI * 2),
           d = r.range(28, 60);
@@ -306,7 +325,7 @@ function packsMonthly(w: World, hooks: WildlifeHooks): void {
           y = p.ty + Math.sin(ang) * d;
         if (!w.inside(Math.floor(x), Math.floor(y))) continue;
         if (w.L.water[Math.floor(y) * w.W + Math.floor(x)] >= 2) continue;
-        if ([...w.packs, ...born].some((o) => Math.hypot(o.tx - x, o.ty - y) < 26)) continue;
+        if ([...w.packs, ...born].some((o) => Math.hypot(o.tx - x, o.ty - y) < 48)) continue;
         if (w.towns.some((t) => Math.hypot(t.x - x, t.y - y) < 16)) continue;
         const np: Pack = { id: w.nextId(), name: names.packName(), x: p.x, y: p.y, px: p.x, py: p.y, n: 3, tx: x, ty: y, hunger: 0.5, targetHerd: -1, kills: 0, founded: w.day };
         p.n -= 3;
@@ -319,6 +338,23 @@ function packsMonthly(w: World, hooks: WildlifeHooks): void {
   w.packs.push(...born);
   for (const p of w.packs) if (p.n < 2 && hooks.onPackLost) hooks.onPackLost(p);
   w.packs = w.packs.filter((p) => p.n >= 2);
+  // wolves recolonise empty valleys on their own, now and then (not under a bounty)
+  if (w.packs.length === 0 && w.month === 9 && w.policies.wolfPolicy !== 'bounty' && r.next() < 0.06) {
+    const edge = r.int(4);
+    const x = edge === 0 ? 3 : edge === 1 ? w.W - 4 : r.range(10, w.W - 10);
+    const y = edge === 2 ? 3 : edge === 3 ? w.H - 4 : r.range(10, w.H - 10);
+    if (w.L.water[Math.floor(y) * w.W + Math.floor(x)] < 2) {
+      const np: Pack = { id: w.nextId(), name: names.packName(), x, y, px: x, py: y, n: 2, tx: w.W / 2 + (x - w.W / 2) * 0.5, ty: w.H / 2 + (y - w.H / 2) * 0.5, hunger: 0.6, targetHerd: -1, kills: 0, founded: w.day };
+      w.packs.push(np);
+      if (hooks.onPackFormed) hooks.onPackFormed(np, np);
+    }
+  }
+}
+
+function deerTotal(w: World): number {
+  let n = 0;
+  for (const h of w.herds) n += h.n;
+  return n;
 }
 
 // ------------------------------------------------------------ beavers
@@ -377,14 +413,14 @@ function coloniesMonthly(w: World, hooks: WildlifeHooks): void {
         const j = (y + oy) * w.W + x + ox;
         food += L.aspen[j] * 1.4 + L.shrub[j] * 0.8;
         if (growing) {
-          L.aspen[j] = Math.max(0, L.aspen[j] - 0.004 * c.n);
-          L.shrub[j] = Math.max(0, L.shrub[j] - 0.003 * c.n);
+          L.aspen[j] = Math.max(0, L.aspen[j] - 0.0022 * c.n);
+          L.shrub[j] = Math.max(0, L.shrub[j] - 0.0016 * c.n);
         }
       }
     food /= 49;
     c.food = food;
     const wasLow = c.dam < 0.3;
-    c.dam = clamp01(c.dam + (food > 0.07 && growing ? 0.06 : -0.015));
+    c.dam = clamp01(c.dam + (food > 0.05 && growing ? 0.06 : -0.015));
     if (wasLow && c.dam >= 0.3 && hooks.onDamBuilt) hooks.onDamBuilt(c);
     // the pond backs up the stream channel
     const len = Math.round(2 + 6 * c.dam);
@@ -404,7 +440,7 @@ function coloniesMonthly(w: World, hooks: WildlifeHooks): void {
         }
     });
     c.years += 1 / 12;
-    if (food < 0.035) {
+    if (food < 0.025) {
       c.n -= r.next() < 0.3 ? 1 : 0;
       if (c.n <= 1 || (food < 0.02 && c.years > 3)) {
         c.active = false;
@@ -415,14 +451,14 @@ function coloniesMonthly(w: World, hooks: WildlifeHooks): void {
     // wolves take the odd beaver
     if (w.packs.some((p) => Math.hypot(p.x - x, p.y - y) < 4) && r.next() < 0.05) c.n--;
     // yearly dispersal of young
-    if (w.month === 3 && c.active && food > 0.1 && c.n >= 3) {
+    if (w.month === 3 && c.active && food > 0.07 && c.n >= 3) {
       if (c.n < 7) c.n += 2;
       for (let k = 0; k < 30; k++) {
         const nx = x + r.intRange(-30, 30),
           ny = y + r.intRange(-30, 30);
         if (!w.inside(nx, ny)) continue;
         const i = ny * w.W + nx;
-        if (beaverSiteScore(w, i) < 0.14) continue;
+        if (beaverSiteScore(w, i) < 0.11) continue;
         if ([...w.colonies, ...newCols].some((o) => o.active && Math.hypot((o.cell % w.W) - nx, ((o.cell / w.W) | 0) - ny) < 10)) continue;
         const nc: Colony = { id: w.nextId(), cell: i, n: 2, food: 0.5, dam: 0.05, years: 0, active: true, abandonedDay: -1 };
         newCols.push(nc);

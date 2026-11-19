@@ -38,7 +38,7 @@ export function initWildlife(w: World, rng: Rng, names: NameBank): void {
     if (forage < 0.45 || L.elev[i] > 2500 || L.slope[i] > 0.4) continue;
     const x = (i % w.W) + 0.5,
       y = ((i / w.W) | 0) + 0.5;
-    w.herds.push({ id: w.nextId(), x, y, px: x, py: y, n: rng.intRange(16, 38), cond: rng.range(0.55, 0.75), fed: 1 });
+    w.herds.push({ id: w.nextId(), x, y, px: x, py: y, n: rng.intRange(26, 48), cond: rng.range(0.6, 0.8), fed: 1 });
   }
   // Wolf packs in remote terrain
   tries = 0;
@@ -55,7 +55,7 @@ export function initWildlife(w: World, rng: Rng, names: NameBank): void {
       y,
       px: x,
       py: y,
-      n: rng.intRange(4, 7),
+      n: rng.intRange(3, 5),
       tx: x,
       ty: y,
       hunger: 0.3,

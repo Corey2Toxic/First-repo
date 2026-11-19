@@ -48,7 +48,7 @@ export function evaluateLegacy(w: World, reason: 'tenure' | 'dismissed' | 'bankr
   const lowShare = burned > 200 ? 1 - severe / burned : 0.6;
   const regime = 8 * clamp01((lowShare - 0.4) / 0.5);
   const startHz = m.startHazard ?? v.hazard;
-  const resilience = 7 * clamp01(0.5 + (startHz - v.hazard) * 4);
+  const resilience = 7 * clamp01(0.5 + (startHz - v.hazard) * 6);
   const deer = deerCount(w);
   const wildlife =
     (w.packs.length > 0 ? 4 : 0) + Math.min(3, w.colonies.filter((c) => c.active).length * 0.75) + (deer > 250 && deer < 1300 ? 2 : 0);
@@ -62,14 +62,18 @@ export function evaluateLegacy(w: World, reason: 'tenure' | 'dismissed' | 'bankr
   const water = 5 * clamp01(1 - w.reservoirSilt * 2.5) + 5 * clamp01(1 - (w.stats.burnedHigh.reduce((a, b) => a + b, 0) / Math.max(1, v.land)) * 1.5);
   breakdown.push(['Clean water', water, `reservoir ${(w.reservoirSilt * 100).toFixed(0)}% silted, ${w.counters.debrisFlows} debris flows`]);
 
-  // finances (10)
-  const fin = 6 * (w.economy.funds >= 0 ? 1 : clamp01(1 + w.economy.funds / 600000)) + 4 * (w.economy.millOpen ? 1 : 0.3);
-  breakdown.push(['Sound finances', fin, `ending balance $${Math.round(w.economy.funds / 1000)}k${w.economy.millOpen ? '' : '; the mill closed'}`]);
+  // finances (10): stay out of debt, keep the mill alive, and put the allocation to work
+  const alloc = m.allocTotal ?? 0;
+  const returned = m.returnedTotal ?? 0;
+  const used = alloc > 0 ? clamp01(1 - (returned / alloc) * 1.6) : 0.5;
+  const fin = 4 * (w.economy.funds >= 0 ? 1 : clamp01(1 + w.economy.funds / 600000)) + 3 * (w.economy.millOpen ? 1 : 0.3) + 3 * used;
+  const finNote = `ending balance ${Math.round(w.economy.funds / 1000)}k; ${Math.round(returned / 1000)}k returned unspent`;
+  breakdown.push(['Sound finances', fin, '$' + finNote.replace('; ', '; $') + (w.economy.millOpen ? '' : '; the mill closed')]);
 
-  // trust (25 weighted by time served)
+  // trust (25 weighted by time served), counted from a baseline of indifference (~38) to enthusiasm (80)
   const avgTrust = m.trustYears ? (m.trustSum ?? 0) / m.trustYears : w.trust;
   const served = clamp01(years / w.config.tenureYears);
-  const trust = 25 * (avgTrust / 100) * (reason === 'tenure' ? 1 : 0.6 + 0.4 * served);
+  const trust = 25 * clamp01((avgTrust - 38) / 42) * (reason === 'tenure' ? 1 : 0.6 + 0.4 * served);
   breakdown.push(['The council’s trust', trust, `average trust ${avgTrust.toFixed(0)}`]);
 
   let score = breakdown.reduce((a, b) => a + b[1], 0);

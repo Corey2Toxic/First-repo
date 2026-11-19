@@ -251,6 +251,9 @@ export interface WorldMemory {
   outbreakYear?: number;
   startDeer?: number;
   lastReturned?: number;
+  deerK?: number;
+  returnedTotal?: number;
+  allocTotal?: number;
 }
 
 export interface ReviewState {

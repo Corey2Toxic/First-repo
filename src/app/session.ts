@@ -63,6 +63,7 @@ export interface Settings {
   wildlife: boolean;
   audio: boolean;
   reveal: boolean;
+  sharp: boolean;
 }
 
 const TOOL_COLORS: Partial<Record<ToolId, string>> = {
@@ -94,7 +95,7 @@ export class GameSession {
   path: number[] = [];
   pathLabel = '';
   private roadStart = -1;
-  settings: Settings = { autoSlow: true, labels: true, contours: false, wildlife: true, audio: false, reveal: false };
+  settings: Settings = { autoSlow: true, labels: true, contours: false, wildlife: true, audio: false, reveal: false, sharp: false };
   toasts: Toast[] = [];
   private listeners = new Set<() => void>();
   private raf = 0;
@@ -169,7 +170,7 @@ export class GameSession {
   }
 
   resize(): void {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(this.settings.sharp ? 2 : 1.25, window.devicePixelRatio || 1);
     const w = this.mapCanvas.clientWidth || window.innerWidth;
     const h = this.mapCanvas.clientHeight || window.innerHeight;
     this.mapCanvas.width = Math.round(w * dpr);

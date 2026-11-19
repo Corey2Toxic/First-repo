@@ -59,7 +59,7 @@ export function councilMonthly(w: World): void {
   };
   // residents
   T.residents.push(['Baseline', 58]);
-  if (m.recentLoss > 0.5) T.residents.push(['Homes lost to fire', -Math.min(32, m.recentLoss * 2.2)]);
+  if (m.recentLoss > 0.5) T.residents.push(['Homes lost to fire', -Math.min(38, m.recentLoss * 2.6)]);
   if (m.nearTownFireDays > 0) T.residents.push(['Fires near town', -Math.min(10, m.nearTownFireDays * 0.6)]);
   if (smokeDays > 2) T.residents.push(['Smoky days', -Math.min(14, smokeDays * 0.45)]);
   if (w.counters.yearWaterShortDays > 0) T.residents.push(['Water shortages', -Math.min(14, w.counters.yearWaterShortDays * 0.4)]);
@@ -392,7 +392,7 @@ export function budgetFor(w: World): number {
   const diff = w.config.difficulty === 'gentle' ? 1.15 : w.config.difficulty === 'harsh' ? 0.85 : 1;
   const trust = w.trust;
   const pop = w.population;
-  return Math.round(1_180_000 * diff * (0.55 + 0.9 * (trust / 100)) * (0.85 + 0.15 * (pop / 3400)));
+  return Math.round(1_020_000 * diff * (0.55 + 0.9 * (trust / 100)) * (0.85 + 0.15 * (pop / 3400)));
 }
 
 export function beginReview(w: World): void {
@@ -524,6 +524,8 @@ export function applyAllocation(w: World): number {
     e.funds = reserve;
   }
   w.memory.lastReturned = returned;
+  w.memory.returnedTotal = (w.memory.returnedTotal ?? 0) + returned;
+  w.memory.allocTotal = (w.memory.allocTotal ?? 0) + r.budgetNext;
   w.earn('Council allocation', r.budgetNext);
   e.annualBudget = r.budgetNext;
   return returned;

@@ -134,3 +134,12 @@ export async function importFile(file: File): Promise<World> {
 export function hasStorage(): boolean {
   return typeof indexedDB !== 'undefined';
 }
+
+/**
+ * False when the page is embedded in a host that blocks script-started
+ * downloads (the hosted single-file build sets this flag); saves still go to
+ * the browser's own storage there.
+ */
+export function canDownload(): boolean {
+  return !(globalThis as { FIREWEED_NO_DOWNLOADS?: boolean }).FIREWEED_NO_DOWNLOADS;
+}
