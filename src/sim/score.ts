@@ -7,13 +7,42 @@ import { clamp01 } from './grid.ts';
 import type { World, GameOutcome } from './world.ts';
 import { vegetationSummary } from './systems/vegetation.ts';
 import { deerCount } from './systems/wildlife.ts';
+import { hazardIndex } from './systems/fuels.ts';
+import { distanceField } from './gen/settle.ts';
 
+/** Mean fuel hazard of the land within 5 cells of standing homes (0–1). */
+export function homeHazard(w: World): number {
+  const L = w.L;
+  const d = distanceField(w, (i) => L.town[i] > 0, 6);
+  let sum = 0,
+    n = 0;
+  for (let i = 0; i < w.N; i++) {
+    if (d[i] === 0 || d[i] > 5 || L.water[i] || L.town[i]) continue;
+    sum += hazardIndex(w, i);
+    n++;
+  }
+  return n ? sum / n : 0;
+}
+
+/** Share of monthly samples meeting a condition (or the fallback when there are none). */
+function shareOf(xs: number[], ok: (x: number) => boolean, fallback: number): number {
+  if (!xs.length) return fallback;
+  let k = 0;
+  for (const x of xs) if (ok(x)) k++;
+  return k / xs.length;
+}
+
+/**
+ * Grade bands, re-based in v1.1 on strategy bots (scripts/strategies.ts, 6 paired seeds each):
+ * doing nothing and refusing every petition averages 74 (Tinderbox, 25 y) and 74 (First Season,
+ * 30 y) — an A on v1.0's bands — and now earns a C; active stewardship averages 88 and 83.
+ */
 export const GRADES: Array<[number, string, string]> = [
-  [85, 'S', 'Legend of the Valley'],
-  [72, 'A', 'Steward of the Long Fire'],
-  [60, 'B', 'Trusted Warden'],
-  [45, 'C', 'Weathered Warden'],
-  [30, 'D', 'Firefighter, Not a Forester'],
+  [90, 'S', 'Legend of the Valley'],
+  [83, 'A', 'Steward of the Long Fire'],
+  [76, 'B', 'Trusted Warden'],
+  [64, 'C', 'Weathered Warden'],
+  [50, 'D', 'Firefighter, Not a Forester'],
   [0, 'E', 'A Cautionary Tale'],
 ];
 
@@ -46,9 +75,17 @@ export function evaluateLegacy(w: World, reason: 'tenure' | 'dismissed' | 'bankr
   const burned = w.counters.totalBurned;
   const severe = w.counters.totalHighSeverity;
   const lowShare = burned > 200 ? 1 - severe / burned : 0.6;
-  const regime = 8 * clamp01((lowShare - 0.4) / 0.5);
-  const startHz = m.startHazard ?? v.hazard;
-  const resilience = 7 * clamp01(0.5 + (startHz - v.hazard) * 6);
+  // fire doing its work needs both quality (mostly low and moderate severity) and quantity. v1.0
+  // scored quality alone, so excluding fire altogether earned full marks. 1 %/yr of the valley in
+  // good fire (wild or prescribed) is a deliberately lenient bar: historical rotations of 5–30 years
+  // in dry pine and 20–60 in mixed conifer imply more
+  const goodRate = (burned - severe) / years / Math.max(1, v.land);
+  const regime = 8 * clamp01(goodRate / 0.01) * clamp01((lowShare - 0.4) / 0.5);
+  // v1.0 scored the change in the valley-wide fuel index, which the player barely moves; what
+  // protective work changes is the fuel next to homes
+  const endHome = homeHazard(w);
+  const startHome = m.startHomeHazard ?? endHome;
+  const resilience = 7 * clamp01(0.5 + (startHome - endHome) * 4);
   const deer = deerCount(w);
   // a healthy herd: 1–10 deer per km² (map-size independent) in fair condition. v1.0 used a fixed
   // 250–1,300 deer, i.e. 24 % of carrying capacity on large maps and 65 % on small ones (D15)
@@ -56,23 +93,41 @@ export function evaluateLegacy(w: World, reason: 'tenure' | 'dismissed' | 'bankr
   let condSum = 0;
   for (const h of w.herds) condSum += h.cond * h.n;
   const density = deer / Math.max(1, km2);
-  const healthyHerd = density >= 1 && density <= 10 && (deer ? condSum / deer : 0) >= 0.45;
-  const wildlife = (w.packs.length > 0 ? 4 : 0) + Math.min(3, w.colonies.filter((c) => c.active).length * 0.75) + (healthyHerd ? 2 : 0);
-  const diversity = 6 * clamp01(shannon([v.grass, v.shrub, v.aspen, v.pine, v.fir]) * 1.15);
-  breakdown.push(['Fire doing its work', regime, `${burned.toLocaleString()} ha burned, ${Math.round(100 * (1 - lowShare))}% at high severity`]);
-  breakdown.push(['A resilient forest', resilience, `fuel hazard ${(startHz * 100).toFixed(0)} → ${(v.hazard * 100).toFixed(0)}`]);
-  breakdown.push(['Wild things', wildlife, `${w.packs.length} wolf packs, ${w.colonies.filter((c) => c.active).length} beaver colonies, ${deer} deer (${density.toFixed(1)}/km²${healthyHerd ? ', healthy' : ''})`]);
-  breakdown.push(['A diverse landscape', diversity, `aspen ${(v.aspen * 100).toFixed(1)}%, pine ${(v.pine * 100).toFixed(0)}%, fir ${(v.fir * 100).toFixed(0)}% cover`]);
+  const cond = deer ? condSum / deer : 0;
+  // wildlife is scored over the whole tenure, not on the last day: in v1.0 a wolf release granted at
+  // the final review earned the full wolf credit
+  const st = w.stats;
+  const wolfShare = shareOf(st.wolves, (x) => x > 0, w.packs.length > 0 ? 1 : 0);
+  const beaverMean = st.beavers.length ? st.beavers.reduce((a, b) => a + b, 0) / st.beavers.length : w.colonies.filter((c) => c.active).length;
+  const herdShare = shareOf(st.deer, (x) => x / Math.max(1, km2) >= 1 && x / Math.max(1, km2) <= 10, density >= 1 && density <= 10 ? 1 : 0);
+  const herd = 2 * herdShare * (cond >= 0.45 ? 1 : 0.5);
+  const wildlife = 4 * wolfShare + Math.min(3, beaverMean * 0.75) + herd;
+  // old growth kept (or grown) since the tenure began
+  const og0 = st.oldGrowth[0] ?? v.oldGrowth;
+  const ogKept = og0 > 0 ? clamp01(v.oldGrowth / og0) : 1;
+  const diversity = 4 * clamp01(shannon([v.grass, v.shrub, v.aspen, v.pine, v.fir]) * 1.15) + 2 * ogKept;
+  breakdown.push([
+    'Fire doing its work',
+    regime,
+    `${burned.toLocaleString()} ha burned (${(goodRate * 100).toFixed(2)}% of the valley a year in good fire), ${Math.round(100 * (1 - lowShare))}% at high severity`,
+  ]);
+  breakdown.push(['Safer around homes', resilience, `fuel hazard near homes ${(startHome * 100).toFixed(0)} → ${(endHome * 100).toFixed(0)}`]);
+  breakdown.push([
+    'Wild things',
+    wildlife,
+    `wolves present ${Math.round(wolfShare * 100)}% of the time, ${beaverMean.toFixed(1)} beaver colonies on average, ${deer} deer now (${density.toFixed(1)}/km²${herd >= 2 ? ', healthy' : ''})`,
+  ]);
+  breakdown.push(['A diverse landscape', diversity, `aspen ${(v.aspen * 100).toFixed(1)}%, pine ${(v.pine * 100).toFixed(0)}%, fir ${(v.fir * 100).toFixed(0)}% cover; old growth ${og0.toLocaleString()} → ${v.oldGrowth.toLocaleString()} ha`]);
 
-  // watershed (10)
-  const water = 5 * clamp01(1 - w.reservoirSilt * 2.5) + 5 * clamp01(1 - (w.stats.burnedHigh.reduce((a, b) => a + b, 0) / Math.max(1, v.land)) * 1.5);
-  breakdown.push(['Clean water', water, `reservoir ${(w.reservoirSilt * 100).toFixed(0)}% silted, ${w.counters.debrisFlows} debris flows`]);
+  // watershed (10): the reservoir is judged on its average state over the tenure
+  const meanSilt = m.siltYears ? (m.siltSum ?? 0) / m.siltYears : w.reservoirSilt;
+  const water = 5 * clamp01(1 - meanSilt * 2.5) + 5 * clamp01(1 - (w.stats.burnedHigh.reduce((a, b) => a + b, 0) / Math.max(1, v.land)) * 1.5);
+  breakdown.push(['Clean water', water, `reservoir ${(meanSilt * 100).toFixed(0)}% silted on average (${(w.reservoirSilt * 100).toFixed(0)}% now), ${w.counters.debrisFlows} debris flows`]);
 
-  // finances (10): stay out of debt, keep the mill alive, and put the allocation to work
-  const alloc = m.allocTotal ?? 0;
+  // finances (10): stay out of debt and keep the mill alive. v1.0 also paid 3 points for spending
+  // the allocation, which rewarded spending for its own sake
   const returned = m.returnedTotal ?? 0;
-  const used = alloc > 0 ? clamp01(1 - (returned / alloc) * 1.6) : 0.5;
-  const fin = 4 * (w.economy.funds >= 0 ? 1 : clamp01(1 + w.economy.funds / 600000)) + 3 * (w.economy.millOpen ? 1 : 0.3) + 3 * used;
+  const fin = 6 * (w.economy.funds >= 0 ? 1 : clamp01(1 + w.economy.funds / 600000)) + 4 * (w.economy.millOpen ? 1 : 0.3);
   const finNote = `ending balance ${Math.round(w.economy.funds / 1000)}k; ${Math.round(returned / 1000)}k returned unspent`;
   breakdown.push(['Sound finances', fin, '$' + finNote.replace('; ', '; $') + (w.economy.millOpen ? '' : '; the mill closed')]);
 

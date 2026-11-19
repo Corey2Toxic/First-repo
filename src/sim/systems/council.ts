@@ -505,6 +505,9 @@ export function beginReview(w: World, closed: LedgerYear = w.economy.history.at(
   const tenureOver = yr >= w.config.tenureYears;
   if (!verdict && tenureOver) verdict = 'tenure';
   r.verdict = verdict || (trust > 70 ? 'praise' : 'ok');
+  // the council puts no petitions to an outgoing warden (the review screen never showed them, but
+  // the command layer let a script grant a last dredging or wolf release just before the legacy score)
+  if (verdict === 'tenure' || verdict === 'dismissed' || verdict === 'bankrupt') r.petitions = [];
   for (const p of r.petitions) w.memory.lastPetitionYear[(p as Petition & { key: string }).key] = w.year;
 }
 

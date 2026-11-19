@@ -22,6 +22,7 @@ import { hydrologyDaily } from './systems/hydrology.ts';
 import { maintainBuffers, townsDaily, townsYearly, updateFirewise } from './systems/towns.ts';
 import { applyAllocation, beginReview, councilMonthly } from './systems/council.ts';
 import { makeEventHooks, monthlyDiscoveries } from './events.ts';
+import { homeHazard } from './score.ts';
 import { discover } from './notes.ts';
 
 export interface SimHooks extends FireStepHooks {
@@ -77,6 +78,8 @@ export class Simulation {
       w.memory.startHazard = vegetationSummary(w).hazard;
       w.memory.startDeer = deerCount(w);
     }
+    // saves from before v1.1 have no near-home baseline: take it when the game is resumed
+    if (w.memory.startHomeHazard === undefined) w.memory.startHomeHazard = homeHazard(w);
   }
 
   /** True when the simulation is waiting on the player (annual review, game over). */
@@ -209,6 +212,8 @@ export class Simulation {
     w.memory.lastYearSmoke = c.yearSmokeDays;
     w.memory.trustSum = (w.memory.trustSum ?? 0) + w.trust;
     w.memory.trustYears = (w.memory.trustYears ?? 0) + 1;
+    w.memory.siltSum = (w.memory.siltSum ?? 0) + w.reservoirSilt;
+    w.memory.siltYears = (w.memory.siltYears ?? 0) + 1;
     w.memory.rxSmokeDays = Math.floor((w.memory.rxSmokeDays ?? 0) * 0.5);
     c.yearBurned = 0;
     c.yearBurnedHigh = 0;

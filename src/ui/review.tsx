@@ -146,7 +146,8 @@ export function EndModal({ s, onNew, onTitle, onContinue }: { s: GameSession; on
     'Homes kept safe': 15,
     'A living community': 10,
     'Fire doing its work': 8,
-    'A resilient forest': 7,
+    'Safer around homes': 7,
+    'A resilient forest': 7, // v1.0 saves that ended before v1.1
     'Wild things': 9,
     'A diverse landscape': 6,
     'Clean water': 10,

@@ -6,6 +6,8 @@
  *   node scripts/strategies.ts --one <seed> <strategy> <scenario> <years>
  */
 import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { encodeWorld } from '../src/sim/save.ts';
 import { generateWorld } from '../src/sim/gen/index.ts';
 import { makeConfig } from '../src/sim/scenarios.ts';
 import type { ScenarioId, World } from '../src/sim/world.ts';
@@ -19,8 +21,9 @@ import { deerCount } from '../src/sim/systems/wildlife.ts';
 import { evaluateLegacy } from '../src/sim/score.ts';
 import { DX8, DY8 } from '../src/sim/grid.ts';
 
-type Strategy = 'passive' | 'suppress' | 'steward' | 'baron';
-const STRATS: Strategy[] = ['passive', 'suppress', 'steward', 'baron'];
+// passive: refuse every petition, do nothing else; grantall: grant every petition, nothing else
+type Strategy = 'passive' | 'grantall' | 'suppress' | 'steward' | 'baron';
+const STRATS: Strategy[] = (process.env.FW_STRATS?.split(',') as Strategy[]) ?? ['passive', 'grantall', 'suppress', 'steward', 'baron'];
 
 function townDist(w: World) {
   return distanceField(w, (i) => w.L.town[i] > 0, 60);
@@ -122,6 +125,7 @@ function play(seed: string, strat: Strategy, scen: ScenarioId, years: number) {
       if (strat === 'steward') accept = p.faction === 'residents' || p.faction === 'conservation' || (p.action.type === 'policy' && p.faction === 'tourism');
       else if (strat === 'suppress') accept = p.faction !== 'conservation';
       else if (strat === 'baron') accept = p.faction === 'timber' || p.faction === 'ranchers';
+      else if (strat === 'grantall') accept = true;
       applyCommand(ww, { t: 'petition', id: p.id, accept });
     }
     trustSum += ww.trust;
@@ -140,6 +144,8 @@ function play(seed: string, strat: Strategy, scen: ScenarioId, years: number) {
     if (w.review.pending) onReview(w);
   }
   if (!w.outcome.ended) w.outcome = evaluateLegacy(w, 'tenure');
+  // FW_SAVE_DIR: keep the final world, so score formulas can be compared on identical end states
+  if (process.env.FW_SAVE_DIR) writeFileSync(`${process.env.FW_SAVE_DIR}/${scen}-${seed}-${strat}.fwd`, encodeWorld(w));
   if (process.env.FW_FIRES) {
     // FW_FIRES=1: list the fires that mattered (stderr), for balancing
     for (const f of w.fires) {
@@ -159,6 +165,7 @@ function play(seed: string, strat: Strategy, scen: ScenarioId, years: number) {
     yearsServed: Math.floor(w.yearsElapsed),
     reason: w.outcome.reason,
     score: w.outcome.score,
+    breakdown: w.outcome.breakdown.map((b) => [b[0], b[1]]),
     avgTrust: Math.round(trustN ? trustSum / trustN : w.trust),
     burned,
     severePct: burned ? Math.round((100 * w.counters.totalHighSeverity) / burned) : 0,
@@ -205,7 +212,7 @@ if (args[0] === '--one') {
       }
     }
   };
-  await Promise.all([worker(), worker(), worker(), worker()]);
+  await Promise.all(Array.from({ length: Number(process.env.FW_JOBS ?? 4) }, worker));
   console.log('\nstrategy   score trust served burned sev% mega homes  rx   hazard deer wolves beavers funds mill silt');
   for (const st of STRATS) {
     const rs = results.filter((r) => r.strat === st);

@@ -260,6 +260,11 @@ export interface WorldMemory {
   trustYears?: number;
   startPopulation?: number;
   startHazard?: number;
+  /** mean fuel hazard within 5 cells of homes when the tenure began */
+  startHomeHazard?: number;
+  /** reservoir silt summed over year ends, for the tenure average */
+  siltSum?: number;
+  siltYears?: number;
   outbreakYear?: number;
   startDeer?: number;
   lastReturned?: number;
