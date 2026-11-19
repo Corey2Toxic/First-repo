@@ -350,24 +350,57 @@ export function autoDispatch(w: World): void {
       return { fe, th, score: (fe.response === 'suppress' ? 1 : 0.5) * (40 / (5 + th.dist)) + Math.sqrt(fe.area) * 0.2 + (fe.inBuffer ? 25 : 0) };
     })
     .sort((a, b) => b.score - a.score);
-  const assigned = (fe: FireEvent, kind?: Crew['kind']) =>
-    w.crews.filter((c) => c.task?.fireId === fe.id && (!kind || c.kind === kind)).length;
-  for (const c of w.crews) {
-    // idle crews, crews heading home from a finished job, and crews on routine project work
-    const free = c.state === 'idle' || (c.state === 'returning' && !c.task) || (c.task?.kind === 'project' && !c.manual);
-    if (!free) continue;
-    if (c.manual) continue;
-    if (c.fatigue > 0.95) continue;
-    for (const { fe, th } of scored) {
-      if (c.kind === 'engine' && th.dist > 16 && !fe.inBuffer && roadGap(w, fe) > 6) continue; // engines defend homes and roadsides
-      if (fe.response === 'contain' && c.kind === 'hand' && th.dist > 20) continue;
-      const want = (c.kind === 'hand' ? Math.min(4, 1 + Math.floor(Math.sqrt(fe.area) / 8)) : c.kind === 'engine' ? 2 : 1) + (fe.inBuffer && c.kind !== 'heli' ? 1 : 0);
-      if (assigned(fe, c.kind) >= want) continue;
-      // projects yield to fires
-      const pr = c.task?.kind === 'project' ? w.projects.find((p) => p.id === c.task!.projectId) : undefined;
-      if (pr && pr.status === 'burning') continue; // never abandon a burn in progress
-      if (assignToFire(w, c, fe)) break;
+  const assigned = (fe: FireEvent, kind: Crew['kind']) => w.crews.filter((c) => c.task?.fireId === fe.id && c.kind === kind).length;
+  // idle crews, crews heading home from a finished job, and crews on routine project work
+  const isFree = (c: Crew) => {
+    if (c.manual || c.fatigue > 0.95) return false;
+    if (c.state === 'idle' || (c.state === 'returning' && !c.task)) return true;
+    if (c.task?.kind !== 'project') return false;
+    const pr = w.projects.find((p) => p.id === c.task!.projectId);
+    return !(pr && pr.status === 'burning'); // never abandon a burn in progress
+  };
+  const tried = new Set<Crew>();
+  // fires in priority order; each gets the nearest free crews of each kind (v1.0 went down the roster)
+  for (const { fe, th } of scored) {
+    const cx = (fe.minX + fe.maxX) / 2,
+      cy = (fe.minY + fe.maxY) / 2;
+    for (const kind of ['hand', 'engine', 'heli'] as const) {
+      if (kind === 'engine' && th.dist > 16 && !fe.inBuffer && roadGap(w, fe) > 6) continue; // engines defend homes and roadsides
+      if (fe.response === 'contain' && kind === 'hand' && th.dist > 20) continue;
+      const want = (kind === 'hand' ? Math.min(4, 1 + Math.floor(Math.sqrt(fe.area) / 8)) : kind === 'engine' ? 2 : 1) + (fe.inBuffer && kind !== 'heli' ? 1 : 0);
+      let have = assigned(fe, kind);
+      while (have < want) {
+        let best: Crew | null = null,
+          bd = Infinity;
+        for (const c of w.crews) {
+          if (c.kind !== kind || tried.has(c) || !isFree(c)) continue;
+          const d = Math.hypot(c.x - cx, c.y - cy);
+          if (d < bd) {
+            bd = d;
+            best = c;
+          }
+        }
+        if (!best) break;
+        tried.add(best);
+        if (assignToFire(w, best, fe)) have++;
+      }
     }
+  }
+}
+
+/**
+ * Dawn: a fire with no flaming edge left that is (nearly) all lined keeps one hand crew on patrol and
+ * releases the rest (v1.0 kept every crew on a fire until its last ember was out, tying up the whole
+ * roster for weeks on smouldering fires).
+ */
+function releaseFromContainedFires(w: World): void {
+  const flaming = new Map<number, number>();
+  for (const b of w.burning) if (w.L.fphase[b] === 0) flaming.set(w.L.fid[b], (flaming.get(w.L.fid[b]) ?? 0) + 1);
+  for (const fe of w.fires) {
+    if (!fe.active || fe.cause === 'prescribed' || (flaming.get(fe.id) ?? 0) > 0 || fe.containment < 0.9) continue;
+    const on = w.crews.filter((c) => c.task?.fireId === fe.id && !c.manual).sort((a, b) => a.id - b.id);
+    const keep = on.find((c) => c.kind === 'hand') ?? null;
+    for (const c of on) if (c !== keep) goHome(w, c);
   }
 }
 
@@ -475,8 +508,11 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
   // (initial attack — the calm, damp night is the best time to hold it) but rest on large ones;
   // engines keep defending houses
   const initialAttack = fe.area <= 40 && c.fatigue < 0.75;
-  if (!day && c.kind === 'heli') return;
-  if (!day && c.kind === 'hand' && !initialAttack) return;
+  // crews that hold position overnight are resting, and recover (v1.0 counted them as working)
+  if ((!day && c.kind === 'heli') || (!day && c.kind === 'hand' && !initialAttack)) {
+    c.state = 'resting';
+    return;
+  }
   if (c.kind === 'heli') return heliTick(w, c, fe, hours);
   chargeFire(w, fe, hours, c.kind);
   c.hoursWorked += hours;
@@ -731,6 +767,7 @@ function projectTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
 
 /** Daily bookkeeping: dispatch, recall crews from finished fires, project assignment. */
 export function crewsDaily(w: World): void {
+  releaseFromContainedFires(w);
   autoDispatch(w);
   assignProjects(w);
   // manual "standby" crews with no task return home at dawn

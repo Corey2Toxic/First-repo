@@ -284,4 +284,44 @@ describe('fire behaviour', () => {
     expect(lengthToBreadth(30, 0)).toBeGreaterThan(lengthToBreadth(10, 0));
     expect(lengthToBreadth(200, 1)).toBeLessThanOrEqual(8);
   });
+
+  it('ground burned this season has no cured grass to carry a second fire', () => {
+    const run = (burnedThisSeason: boolean) => {
+      let area = 0;
+      for (let k = 0; k < 6; k++) {
+        const w = flatWorld(80, 30, { grass: 0.85, litter: 0.4 });
+        w.rng.fire = new Rng('reburn-' + k);
+        if (burnedThisSeason) for (let i = 0; i < w.N; i++) w.L.lastBurn[i] = w.yearF - 0.1;
+        const fe = startFire(w, 15 * w.W + 10, 'human')!;
+        burn(w, 4);
+        area += fe.area;
+      }
+      return area;
+    };
+    expect(run(true)).toBeLessThan(run(false) * 0.2);
+  });
+
+  it('a road stops a light-wind grass fire more often than not', () => {
+    let crossed = 0,
+      reached = 0;
+    for (let k = 0; k < 12; k++) {
+      const w = flatWorld(60, 30, { grass: 0.85, litter: 0.4 });
+      w.rng.fire = new Rng('road-' + k);
+      w.weather.windSpeed = 2;
+      for (let y = 0; y < w.H; y++) w.L.infra[y * w.W + 30] |= 1; // a road across the strip
+      const fe = startFire(w, 15 * w.W + 22, 'human')!;
+      burn(w, 6);
+      let past = false,
+        at = false;
+      for (let i = 0; i < w.N; i++) {
+        if (w.L.fid[i] !== fe.id && !(w.L.lastBurn[i] > 0)) continue;
+        if (i % w.W === 29) at = true;
+        if (i % w.W > 31) past = true;
+      }
+      if (at) reached++;
+      if (past) crossed++;
+    }
+    expect(reached).toBeGreaterThan(6);
+    expect(crossed).toBeLessThan(reached / 2); // v1.0/v1.1-early: a road only halved the rate
+  });
 });

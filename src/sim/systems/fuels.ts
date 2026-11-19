@@ -18,7 +18,11 @@ export interface CellFuel {
 export function cellFuel(w: World, i: number, out?: CellFuel): CellFuel {
   const L = w.L;
   const g = greenness(w, i);
-  const grassFuel = L.grass[i] * 2.6 * (1 - 0.8 * g) * (1 - 0.6 * L.graze[i]);
+  // a burn leaves no cured grass to carry fire until the next season's crop has grown and cured
+  // (v1.0 hid this behind a rate that collapsed at low fuel load)
+  const since = w.yearF - L.lastBurn[i];
+  const regrown = since >= 0 && since < 1 ? smoothstep(0.35, 0.95, since) : 1;
+  const grassFuel = L.grass[i] * 2.6 * (1 - 0.8 * g) * (1 - 0.6 * L.graze[i]) * regrown;
   const shrubFine = L.shrub[i] * 2.4 * (1 - 0.45 * g);
   const fine = L.litter[i] + grassFuel + shrubFine + L.red[i] * 10 + L.slash[i] * 0.45;
   const youngFir = 1 - smoothstep(25, 90, L.ageF[i]);

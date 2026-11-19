@@ -120,6 +120,33 @@ describe('economy, commands and politics', () => {
     expect(fe.active === false || arrived > 0).toBe(true); // on the line within 12 hours (or already out)
   }, 60000);
 
+  it('crews leave a fire once its edge is lined and nothing is flaming, keeping one on patrol', () => {
+    const w = smallWorld('firstseason', 'release-1');
+    const sim = new Simulation(w, {}, { ignitions: false, autoReview: true });
+    sim.runDays(150);
+    const t = w.towns[0];
+    let cell = -1;
+    for (let r = 20; r < 40 && cell < 0; r++)
+      for (let a = 0; a < 16 && cell < 0; a++) {
+        const x = Math.round(t.x + Math.cos(a) * r),
+          y = Math.round(t.y + Math.sin(a) * r);
+        if (!w.inside(x, y)) continue;
+        const i = y * w.W + x;
+        if (!w.L.water[i] && !w.L.town[i] && cellFuel(w, i).fine > 2) cell = i;
+      }
+    const fe = startFire(w, cell, 'human')!;
+    fe.detected = true;
+    sim.tick();
+    expect(w.crews.filter((c) => c.task?.fireId === fe.id).length).toBeGreaterThan(0);
+    // the fire is now a smouldering, fully lined patch
+    for (const b of w.burning) if (w.L.fid[b] === fe.id) w.L.fphase[b] = 1;
+    fe.containment = 1;
+    while (w.sub !== 0) sim.tick();
+    sim.tick(); // dawn bookkeeping
+    const still = w.crews.filter((c) => c.task?.fireId === fe.id);
+    expect(fe.active === false || still.length <= 1).toBe(true);
+  }, 60000);
+
   it('a crew pulled off a treatment puts the treatment back in the queue', () => {
     const w = smallWorld('firstseason', 'requeue-1');
     const t = w.towns[0];

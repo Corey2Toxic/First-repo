@@ -312,7 +312,7 @@ export const KE_LITTER = 0.6;
  * (~1.9x for crown runs) is gone with Erlang(4) times; this restores the same observed crown-fire
  * front speeds (fire lab: ~1–2 km/h at 12–15 m/s), which the audit found realistic.
  */
-export const CROWN_SCALE = 2.2;
+export const CROWN_SCALE = 3.0;
 
 /** CSIRO grassland head-fire rate (km/h), fully cured, before moisture; u10 = open 10 m wind in km/h. */
 export function grassHeadRateKmh(u10: number): number {
@@ -384,9 +384,15 @@ function spreadRate(ctx: StepCtx, b: number, n: number, d: number, vigor: number
   if (crownSrc && f.canopy > 0.3) {
     const canopyCov = L.pine[n] + L.fir[n] + L.aspen[n] * 0.6;
     const windMid = ctx.windEff * (1 - 0.55 * Math.min(1, canopyCov));
-    const wf = Math.exp(0.22 * windMid * cosT);
+    // head rate as in v1.0, distributed on a wind ellipse (v1.0's lateral crown rate grew with wind
+    // too, so crown fires were nearly circular and burned ~4x the area of a real crown run)
+    const wfHead = Math.exp(0.22 * windMid);
+    // (capped at 5:1: spotting and wind shifts keep real crown runs wider than the ideal ellipse)
+    const LBc = Math.min(5, lengthToBreadth(ctx.windEff * 3.6, 0));
+    const ec = Math.sqrt(1 - 1 / (LBc * LBc));
     const crownDamp = clamp01(1 - fm / 0.2) * (1 - 0.55 * f.green * (1 - f.grassShare));
-    const Rc = CROWN_SCALE * (0.1 + 0.12 * ctx.windEff) * crownDamp * f.canopy * Math.pow(Math.max(wf, 0.05), 0.6) * Math.pow(sf, 0.7);
+    const Rc =
+      CROWN_SCALE * (0.1 + 0.12 * ctx.windEff) * crownDamp * f.canopy * Math.pow(wfHead, 0.6) * Math.pow(sf, 0.7) * ((1 - ec) / (1 - ec * cosT));
     R = Math.max(R, Rc * (1 - 0.5 * L.fline[n]));
   } else {
     R *= 1 - L.fline[n];
@@ -435,6 +441,16 @@ function scheduleFrom(ctx: StepCtx, b: number, t0: number, vigor: number): void 
     if (isStructure) continue; // houses spread to houses and by embers
     const R = spreadRate(ctx, b, n, d, vigor, crownSrc);
     if (R <= 0) continue;
+    // a road or fuel break stops a surface fire unless it is pushed across by wind or intensity
+    // (v1.0 only halved the rate, which stops nothing once grass runs at realistic speed)
+    if (!crownSrc && L.infra[n] & (INFRA.ROAD | INFRA.FUELBREAK)) {
+      const cosW = (DX8[d] * ctx.wdx + DY8[d] * ctx.wdy) / DIST8[d];
+      // (per attempt; a long front makes many attempts, so a light-wind fire crosses only rarely
+      // while a wind-driven head fire still gets across)
+      const push = smoothstep(3, 12, ctx.windEff * Math.max(0, cosW)) * 0.5 + smoothstep(0.3, 0.9, L.fint[b]) * 0.4;
+      const breach = clamp01(0.004 + push) * (L.infra[n] & INFRA.FUELBREAK ? 0.6 : 1);
+      if (r.next() >= breach) continue;
+    }
     const tau = travelTime(r, DIST8[d] / R);
     if (tau < remaining) pushEvent(t0 + tau, n, b, 0);
   }
