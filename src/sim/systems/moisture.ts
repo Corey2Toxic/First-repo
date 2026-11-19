@@ -12,7 +12,6 @@ import type { World } from '../world.ts';
 interface StaticCache {
   tOff: Float32Array; // temperature offset from the valley reference (°C)
   pFac: Float32Array; // precipitation multiplier
-  cap: Float32Array; // soil water capacity (mm) – recomputed yearly as soil erodes
   riparian: Uint8Array; // next to permanent water
   sample: Int32Array; // land cells sampled for valley statistics
 }
@@ -24,12 +23,10 @@ export function moistureCache(w: World): StaticCache {
   const L = w.L;
   const tOff = new Float32Array(w.N),
     pFac = new Float32Array(w.N),
-    cap = new Float32Array(w.N),
     riparian = new Uint8Array(w.N);
   for (let i = 0; i < w.N; i++) {
     tOff[i] = -LAPSE * (L.elev[i] - REF_ELEV) + 0.9 * L.aspectS[i];
     pFac[i] = precipFactor(L.elev[i]) * (1 + 0.08 * (L.twi[i] - 0.5));
-    cap[i] = 70 + 190 * L.soil[i];
     if (L.flowAcc[i] >= 300 || L.water[i]) riparian[i] = 1;
   }
   for (let y = 1; y < w.H - 1; y++)
@@ -41,15 +38,18 @@ export function moistureCache(w: World): StaticCache {
     }
   const land: number[] = [];
   for (let i = 0; i < w.N; i += 7) if (!L.water[i]) land.push(i);
-  c = { tOff, pFac, cap, riparian, sample: Int32Array.from(land) };
+  c = { tOff, pFac, riparian, sample: Int32Array.from(land) };
   caches.set(w, c);
   return c;
 }
 
-export function refreshSoilCapacity(w: World): void {
-  const c = moistureCache(w);
-  for (let i = 0; i < w.N; i++) c.cap[i] = 70 + 190 * w.L.soil[i];
+/** Soil water capacity (mm) follows soil depth, which erodes over time. */
+export function soilCapacity(soil: number): number {
+  return 70 + 190 * soil;
 }
+
+/** Kept for API compatibility: capacity is computed on the fly from soil depth. */
+export function refreshSoilCapacity(_w: World): void {}
 
 /** Equilibrium moisture content (fraction) from relative humidity (0..1) and °C. */
 export function emc(rh: number, t: number): number {
@@ -89,10 +89,10 @@ export function dailyMoisture(w: World, runoff: Float32Array): void {
     hydro = L.hydro,
     slope = L.slope,
     elev = L.elev,
-    twi = L.twi;
+    twi = L.twi,
+    soil = L.soil;
   const tOff = c.tOff,
     pFac = c.pFac,
-    capA = c.cap,
     rip = c.riparian;
   const precip = wx.precip,
     temp = wx.temp,
@@ -124,7 +124,7 @@ export function dailyMoisture(w: World, runoff: Float32Array): void {
     snowA[i] = snow;
 
     // --- soil water ---
-    const cap = capA[i];
+    const cap = 70 + 190 * soil[i];
     let sm = smA[i];
     const input = rain + melt;
     const can = pine[i] + fir[i] + 0.5 * aspen[i];

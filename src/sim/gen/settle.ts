@@ -450,27 +450,38 @@ export function nameLandmarks(w: World, names: NameBank, info: TerrainInfo): voi
   const marks: Landmark[] = [];
   // Peaks: local maxima within radius 10 in the upper elevations.
   const sorted = Array.from(L.elev).sort((a, b) => a - b);
-  const p70 = sorted[Math.floor(sorted.length * 0.7)];
-  const peaks: Array<[number, number]> = [];
-  for (let y = 3; y < H - 3; y++)
-    for (let x = 3; x < W - 3; x++) {
-      const i = y * W + x;
-      const e = L.elev[i];
-      if (e < p70) continue;
-      let isMax = true;
-      for (let dy = -10; dy <= 10 && isMax; dy++)
-        for (let dx = -10; dx <= 10; dx++) {
-          const xx = x + dx,
-            yy = y + dy;
-          if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
-          if (L.elev[yy * W + xx] > e) {
-            isMax = false;
-            break;
+  const p60 = sorted[Math.floor(sorted.length * 0.6)];
+  const findPeaks = (PR: number, minE: number): Array<[number, number]> => {
+    const out: Array<[number, number]> = [];
+    for (let y = 3; y < H - 3; y++)
+      for (let x = 3; x < W - 3; x++) {
+        const i = y * W + x;
+        const e = L.elev[i];
+        if (e < minE) continue;
+        let isMax = true;
+        for (let dy = -PR; dy <= PR && isMax; dy++)
+          for (let dx = -PR; dx <= PR; dx++) {
+            const xx = x + dx,
+              yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+            if (L.elev[yy * W + xx] > e) {
+              isMax = false;
+              break;
+            }
           }
-        }
-      if (isMax) peaks.push([e, i]);
-    }
+        if (isMax) out.push([e, i]);
+      }
+    return out;
+  };
+  // summits that dominate their surroundings; relax the radius on small or rolling maps
+  let peaks: Array<[number, number]> = [];
+  for (const PR of [Math.max(5, Math.round(W / 26)), 6, 4]) {
+    peaks = findPeaks(PR, PR === 4 ? sorted[Math.floor(sorted.length * 0.45)] : p60);
+    if (peaks.length >= 5) break;
+  }
   peaks.sort((a, b) => b[0] - a[0]);
+  // keep summits apart from each other
+  peaks = peaks.filter((p, k) => !peaks.slice(0, k).some((q) => Math.hypot((q[1] % W) - (p[1] % W), ((q[1] / W) | 0) - ((p[1] / W) | 0)) < 7));
   for (const [e, i] of peaks.slice(0, 12)) {
     marks.push({ kind: 'peak', name: names.peak(), x: i % W, y: (i / W) | 0, elev: e, importance: e > peaks[0][0] - 250 ? 3 : 2 });
   }

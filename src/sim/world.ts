@@ -79,6 +79,7 @@ export const LAYER_SPECS = {
   ftime: 'f32', // remaining burn hours
   fid: 'i32', // fire event id (-1 none)
   fpeak: 'f32', // peak intensity during the current burn (sets severity)
+  fphase: 'u8', // 0 flaming front, 1 smouldering
   crown: 'u8', // 1 if crowning
   fline: 'f32', // fireline/containment strength 0..1
   retard: 'f32', // retardant strength 0..1

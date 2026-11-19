@@ -169,11 +169,11 @@ export class Simulation {
 
   private startOfYear(): void {
     const w = this.w;
+    w.lastYearStarted = w.year;
     newClimateYear(w);
     refreshSuitability(w);
     refreshSoilCapacity(w);
     if (w.day > 0) beetleWinterKill(w);
-    w.lastYearStarted = w.year;
     if (w.economy.ledger.year !== w.year) w.economy.ledger = { year: w.year, income: {}, expense: {} };
   }
 

@@ -51,21 +51,31 @@ export function vegCache(w: World): VegCache {
   }
   c = { wet, meanT, cap, suit, slot };
   caches.set(w, c);
+  applyClimateShift(w, c);
   return c;
 }
 
-/** Re-evaluate site suitability (called yearly so warming shifts the bands). */
-export function refreshSuitability(w: World): void {
-  const c = vegCache(w);
+/**
+ * Site suitability under the climate of the current year. Depends only on
+ * static terrain and the persisted `lastYearStarted`, so a reloaded game
+ * rebuilds exactly the same cache.
+ */
+function applyClimateShift(w: World, c: VegCache): void {
+  const years = Math.max(0, w.lastYearStarted - w.startYear);
   // forests respond to warming with a lag; use half the realised trend
-  const dT = 0.5 * w.climate.trendPerDecade * (w.yearsElapsed / 10);
+  const dT = 0.5 * w.climate.trendPerDecade * (years / 10);
   for (let i = 0; i < w.N; i++) {
     const mt = c.meanT[i] + dT;
     // warming also dries sites a little (higher evaporative demand)
     const wet = clamp01(c.wet[i] - dT * 0.03);
-    c.cap[i] = canopyCapacity(mt, wet) * lerp(0.72, 1, w.L.soil[i]);
+    c.cap[i] = canopyCapacity(mt, wet);
     for (let s = 0; s < 5; s++) c.suit[s][i] = suitability(s, mt, wet);
   }
+}
+
+/** Re-evaluate site suitability (called at the start of each year). */
+export function refreshSuitability(w: World): void {
+  applyClimateShift(w, vegCache(w));
 }
 
 /** Seed rain: blurred maps of cone/seed-bearing canopy, recomputed monthly. */
@@ -124,7 +134,8 @@ function updateCell(w: World, i: number, c: VegCache): void {
   const mc = moistureCache(w);
   const monthT = seasonalTemp(w.doy) + w.climate.yearTemp + mc.tOff[i];
   const gT = clamp01((monthT - 3) / 10);
-  const cap = Math.max(0.05, c.cap[i]);
+  // soil depth (which erodes) scales how much canopy a site can hold
+  const cap = Math.max(0.05, c.cap[i] * lerp(0.72, 1, L.soil[i]));
   const sA = c.suit[SP.ASPEN][i],
     sP = c.suit[SP.PINE][i],
     sF = c.suit[SP.FIR][i],

@@ -12,7 +12,7 @@ export function phenology(doy: number, elev: number): number {
   const d = doy / 360;
   const lag = (elev - 1500) / 1500 * 0.06; // high country greens later
   const up = smoothstep(0.02 + lag, 0.16 + lag, d);
-  const cure = 1 - smoothstep(0.36 - lag * 0.5, 0.6, d);
+  const cure = 1 - smoothstep(0.27 - lag * 0.5, 0.5, d);
   return clamp01(up * (0.25 + 0.75 * cure));
 }
 

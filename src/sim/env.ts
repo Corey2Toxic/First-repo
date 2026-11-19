@@ -19,12 +19,14 @@ export function precipFactor(elev: number): number {
   return Math.max(0.6, 1 + (0.45 * (elev - REF_ELEV)) / 1000);
 }
 
-/** Static site wetness potential 0..1 (topography, elevation, aspect, soil). */
+/**
+ * Static site wetness potential 0..1 from topography, elevation and aspect.
+ * Must depend only on static layers: it seeds caches that are rebuilt after
+ * loading a save, and determinism requires they come out identical.
+ */
 export function siteWetness(w: World, i: number): number {
   const L = w.L;
-  return clamp01(
-    0.3 + (0.42 * (L.elev[i] - 1400)) / 1500 + 0.45 * (L.twi[i] - 0.4) - 0.18 * L.aspectS[i] + 0.08 * (L.soil[i] - 0.5),
-  );
+  return clamp01(0.3 + (0.42 * (L.elev[i] - 1400)) / 1500 + 0.45 * (L.twi[i] - 0.4) - 0.18 * L.aspectS[i]);
 }
 
 /** Tree line factor: 1 below the line, 0 well above (alpine). */

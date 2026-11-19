@@ -92,6 +92,7 @@ export function igniteCell(w: World, i: number, fe: FireEvent, I: number, crown:
   L.fid[i] = fe.id;
   L.fint[i] = I;
   L.fpeak[i] = I;
+  L.fphase[i] = 0;
   L.crown[i] = crown ? 1 : 0;
   const f = cellFuel(w, i, tmpFuel);
   const heavyAvail = 0.25 + 0.5 * smoothstep(0.25, 0.9, w.climate.droughtIndex);
@@ -219,7 +220,7 @@ function spreadRate(ctx: StepCtx, b: number, n: number, d: number, vigor: number
   const sf = tanPhi > 0 ? Math.exp(3.2 * Math.min(tanPhi, 0.8)) : Math.exp(1.2 * Math.max(tanPhi, -0.8));
   // base rates (cells/hour = 100 m/h) are deliberately below free-burning values to stand in
   // for sub-cell fuel discontinuities (rocks, trails, moist draws) the grid cannot resolve
-  const R0 = (0.035 + 0.25 * f.grassShare + 0.04 * L.shrub[n]) * smoothstep(0.5, 6, f.fine);
+  const R0 = (0.024 + 0.17 * f.grassShare + 0.03 * L.shrub[n]) * smoothstep(0.5, 6, f.fine);
   let R = R0 * damp * wf * sf * ctx.spread;
   if (crownSrc && f.canopy > 0.3) {
     const crownDamp = clamp01(1 - fm / 0.2) * (1 - 0.55 * f.green * (1 - f.grassShare));
@@ -327,16 +328,18 @@ export function fireSubstep(w: World, hooks: FireStepHooks = {}): void {
     if (L.fire[b] !== FIRE.BURNING) continue;
     if (!fireById.has(L.fid[b])) continue;
     const isStructure = L.town[b] > 0;
-    let vigor = smoothstep(0.03, 0.35, L.fint[b]);
+    // a flaming front spreads at full rate; smouldering edges creep
+    let vigor = L.fphase[b] === 0 ? 1 : 0.3;
     // smouldering holdovers can flare when it dries out and the wind picks up
-    if (L.fint[b] < 0.15 && !isStructure) {
+    if (L.fphase[b] === 1 && !isStructure) {
       const dryness = clamp01((0.16 - (L.fm[b] + di.fmAdd)) / 0.1);
       if (r.next() < 0.05 * dryness * (0.5 + windEff / 8)) {
         cellFuel(w, b, f);
         const [I] = ignitionIntensity(w, b, f, windEff * 0.6, 1, di.fmAdd);
         L.fint[b] = Math.max(L.fint[b], I);
         L.fpeak[b] = Math.max(L.fpeak[b], L.fint[b]);
-        vigor = smoothstep(0.03, 0.35, L.fint[b]);
+        L.fphase[b] = 0;
+        vigor = 1;
       }
     }
     scheduleFrom(ctx, b, 0, vigor);
@@ -416,9 +419,13 @@ export function fireSubstep(w: World, hooks: FireStepHooks = {}): void {
     // unless damp air settles in and the fire "goes to sleep"
     L.ftime[b] -= HOURS;
     if (!isStructure) {
-      L.fint[b] = Math.max(Math.min(L.fint[b], floor), L.fint[b] * 0.55);
+      if (L.fphase[b] === 0) {
+        // the front has passed: drop to smouldering
+        L.fphase[b] = 1;
+        L.fint[b] = Math.min(L.fint[b], floor);
+      }
       const damp = L.fm[b] + di.fmAdd - 0.14;
-      if (L.fint[b] < 0.15 && damp > 0) L.ftime[b] -= damp * 60;
+      if (damp > 0) L.ftime[b] -= damp * 60;
     }
     if (L.ftime[b] <= 0) burnedOut.push(b);
   }
@@ -468,6 +475,7 @@ function igniteStructure(w: World, i: number, fe: FireEvent): void {
   L.fire[i] = FIRE.BURNING;
   L.fid[i] = fe.id;
   L.fint[i] = 1.2;
+  L.fphase[i] = 0;
   L.crown[i] = 0;
   L.ftime[i] = 6;
   w.burning.push(i);
@@ -489,13 +497,19 @@ function checkEscape(w: World, fe: FireEvent, cell: number, hooks: FireStepHooks
   }
 }
 
-const projectSets = new Map<number, Set<number>>();
+// per-world cache of project unit membership (ids restart in every new game)
+const projectSets = new WeakMap<World, Map<number, Set<number>>>();
 export function projectContains(w: World, projectId: number, cell: number): boolean {
-  let s = projectSets.get(projectId);
+  let m = projectSets.get(w);
+  if (!m) {
+    m = new Map();
+    projectSets.set(w, m);
+  }
+  let s = m.get(projectId);
   if (!s) {
     const pr = w.projects.find((p) => p.id === projectId);
     s = new Set(pr ? pr.unit : []);
-    projectSets.set(projectId, s);
+    m.set(projectId, s);
   }
   return s.has(cell);
 }
