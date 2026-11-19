@@ -244,14 +244,7 @@ function GameScreen({ s, onLoad, onQuit, onNew }: { s: GameSession; onLoad: (w: 
           s={s}
           onNew={onNew}
           onTitle={onQuit}
-          onContinue={() => {
-            w.outcome.ended = false;
-            w.config.tenureYears += 25;
-            w.review.pending = false;
-            w.economy.funds = Math.max(w.economy.funds, 0);
-            s.toast('The council grants you another 25 years. The valley goes on.', 'good');
-            s.emit();
-          }}
+          onContinue={() => s.command({ t: 'continueSandbox' })}
         />
       ) : null}
     </>
