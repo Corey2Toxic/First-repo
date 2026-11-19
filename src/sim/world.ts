@@ -99,6 +99,9 @@ export const LAYER_SPECS = {
   seedA: 'f32', // monthly seed-rain maps (dispersal kernels of mature trees)
   seedP: 'f32',
   seedF: 'f32',
+  // --- v1.1 (appended: save files are keyed by name) ---
+  standAge: 'f32', // years since the last stand-replacing disturbance (old growth)
+  dstress: 'f32', // multi-year drought memory (~2-year moving average of drought stress)
 } as const satisfies Record<string, LayerType>;
 
 export type LayerName = keyof typeof LAYER_SPECS;
@@ -263,6 +266,8 @@ export interface WorldMemory {
   deerK?: number;
   returnedTotal?: number;
   allocTotal?: number;
+  /** largest beetle-killed area in one flight month this year (ha) */
+  beetleInfested?: number;
   /** once-only notices already given (key → day) */
   told?: Record<string, number>;
   /** wildfire statistics kept exactly even when old fire records are trimmed from saves */

@@ -524,6 +524,22 @@ function upstreamPath(w: World, c: number, k: number): number[] {
   return out;
 }
 
+/** Stream cells beavers could use, from static terrain only (so a reloaded game rebuilds the same list). */
+const habitatCache = new WeakMap<World, number[]>();
+function beaverHabitat(w: World): number[] {
+  let h = habitatCache.get(w);
+  if (h) return h;
+  const L = w.L;
+  h = [];
+  for (let i = 0; i < w.N; i++) {
+    const acc = L.flowAcc[i];
+    if (L.water[i] || acc < 70 || acc > 1300 || L.slope[i] > 0.07) continue;
+    h.push(i);
+  }
+  habitatCache.set(w, h);
+  return h;
+}
+
 function coloniesMonthly(w: World, hooks: WildlifeHooks): void {
   const L = w.L;
   const r = w.rng.wildlife;
@@ -588,18 +604,27 @@ function coloniesMonthly(w: World, hooks: WildlifeHooks): void {
         if (hooks.onColonyAbandoned) hooks.onColonyAbandoned(c);
       }
     }
-    // wolves take the odd beaver
-    if (w.packs.some((p) => Math.hypot(p.x - x, p.y - y) < 4) && r.next() < 0.05) c.n--;
+    // wolves take the odd beaver; a colony reduced below a pair is gone (v1.0 let the count go
+    // negative while the colony stayed 'active', and a negative family regrew the vegetation)
+    if (w.packs.some((p) => Math.hypot(p.x - x, p.y - y) < 4) && r.next() < 0.05) c.n = Math.max(0, c.n - 1);
+    if (c.active && c.n < 2) {
+      c.active = false;
+      c.abandonedDay = w.day;
+      if (hooks.onColonyAbandoned) hooks.onColonyAbandoned(c);
+      continue;
+    }
     // spring kits: any breeding pair with food raises a litter (v1.0 only bred colonies of 3+, inside
     // the dispersal step, so every colony founded by a dispersing pair stayed at 2 forever — D5)
     if (w.month === 2 && c.active && c.n >= 2 && food > 0.05 && c.n < 8) c.n += Math.round(r.intRange(1, 4) * smoothstep(0.05, 0.12, food));
     // two-year-olds disperse from crowded colonies to found new ones
     if (w.month === 3 && c.active && food > 0.07 && c.n >= 5) {
-      for (let k = 0; k < 30; k++) {
-        const nx = x + r.intRange(-30, 30),
-          ny = y + r.intRange(-30, 30);
-        if (!w.inside(nx, ny)) continue;
-        const i = ny * w.W + nx;
+      // search the stream habitat within 3 km (v1.0 tried random cells in a box, which almost never hit
+      // one of the few hundred stream cells beavers can use)
+      const near = beaverHabitat(w).filter((h) => Math.abs((h % w.W) - x) <= 30 && Math.abs(((h / w.W) | 0) - y) <= 30);
+      for (let k = 0; k < Math.min(30, near.length); k++) {
+        const i = near[r.int(near.length)];
+        const nx = i % w.W,
+          ny = (i / w.W) | 0;
         if (beaverSiteScore(w, i) < 0.11) continue;
         if ([...w.colonies, ...newCols].some((o) => o.active && Math.hypot((o.cell % w.W) - nx, ((o.cell / w.W) | 0) - ny) < 10)) continue;
         const nc: Colony = { id: w.nextId(), cell: i, n: 2, food: 0.5, dam: 0.05, years: 0, active: true, abandonedDay: -1 };
@@ -611,6 +636,27 @@ function coloniesMonthly(w: World, hooks: WildlifeHooks): void {
     }
   }
   w.colonies.push(...newCols);
+  // beavers from neighbouring drainages now and then settle a valley that has room for them (not in
+  // a valley set up without beavers): v1.0 had no recolonisation, so local extinction was permanent
+  const active = w.colonies.filter((c) => c.active).length;
+  if (w.month === 3 && w.config.beavers > 0 && active < w.config.beavers && r.next() < 0.15) {
+    let best = -1,
+      bs = 0.15;
+    for (const i of beaverHabitat(w)) {
+      const s = beaverSiteScore(w, i);
+      if (s <= bs) continue;
+      const ix = i % w.W,
+        iy = (i / w.W) | 0;
+      if (w.colonies.some((o) => o.active && Math.hypot((o.cell % w.W) - ix, ((o.cell / w.W) | 0) - iy) < 14)) continue;
+      bs = s;
+      best = i;
+    }
+    if (best >= 0) {
+      const nc: Colony = { id: w.nextId(), cell: best, n: 2, food: 0.5, dam: 0.05, years: 0, active: true, abandonedDay: -1 };
+      w.colonies.push(nc);
+      if (hooks.onColonyFounded) hooks.onColonyFounded(nc);
+    }
+  }
   // forget long-abandoned colonies
   w.colonies = w.colonies.filter((c) => c.active || w.day - c.abandonedDay < 360 * 6);
   w.dirty.water++;

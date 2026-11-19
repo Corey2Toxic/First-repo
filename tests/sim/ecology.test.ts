@@ -4,7 +4,7 @@ import { makeConfig } from '../../src/sim/scenarios.ts';
 import { Simulation } from '../../src/sim/sim.ts';
 import { vegetationSummary } from '../../src/sim/systems/vegetation.ts';
 import { applyFireEffects } from '../../src/sim/systems/fire.ts';
-import { beetlesMonthly, beetleWinterKill } from '../../src/sim/systems/beetles.ts';
+import { beetlesMonthly, beetleWinterKill, seedBeetles } from '../../src/sim/systems/beetles.ts';
 import { deerCount, wildlifeDaily, TERRITORY_RADIUS } from '../../src/sim/systems/wildlife.ts';
 import type { Herd } from '../../src/sim/types.ts';
 import { applyPlanting } from '../../src/sim/systems/projects.ts';
@@ -64,6 +64,7 @@ describe('ecology', () => {
       for (let i = 0; i < w.N; i++) {
         if (w.L.pine[i] > 0.15) {
           w.L.stress[i] = 0.7;
+          w.L.dstress[i] = 0.4; // years of drought, not one dry summer
           w.L.ageP[i] = Math.max(w.L.ageP[i], 90);
           w.L.beetle[i] = 0.05;
         }
@@ -174,5 +175,59 @@ describe('ecology', () => {
     w.L.ageF[j] = 0;
     applyPlanting(w, j, SP.FIR);
     expect(w.L.ageF[j]).toBeCloseTo(1, 5);
+  });
+
+  it('a colony reduced below a breeding pair does not carry on as a ghost (count 0 or negative, still active)', () => {
+    for (const n of [1, 0, -2]) {
+      const w = smallWorld('firstseason', 'ghost-1');
+      w.packs = [];
+      const c = w.colonies[0];
+      c.n = n; // what wolf predation left (v1.0 could drive it below zero)
+      w.day = 150; // a monthly update outside the breeding month
+      wildlifeDaily(w);
+      expect(c.active === false || c.n >= 2).toBe(true);
+    }
+  });
+
+  it('bark beetles erupt in old, crowded pine only after years of drought', () => {
+    const run = (dstress: number) => {
+      const w = smallWorld('tinderbox', 'beetle-2');
+      for (let i = 0; i < w.N; i++)
+        if (w.L.pine[i] > 0.15) {
+          w.L.pine[i] = Math.max(w.L.pine[i], 0.55);
+          w.L.ageP[i] = 120;
+          w.L.dstress[i] = dstress;
+        }
+      seedBeetles(w);
+      let killed = 0;
+      for (let y = 0; y < 3; y++)
+        for (const m of [3, 4, 5, 6]) {
+          w.day = y * 360 + m * 30;
+          const before = w.L.pine.reduce((a, b) => a + b, 0);
+          beetlesMonthly(w);
+          killed += before - w.L.pine.reduce((a, b) => a + b, 0);
+        }
+      return killed;
+    };
+    const normal = run(0.03),
+      drought = run(0.15);
+    expect(drought).toBeGreaterThan(10);
+    expect(drought).toBeGreaterThan(normal * 3);
+  });
+
+  it('old growth is lost to stand-replacing disturbance, not to seedlings (stand age)', () => {
+    const w = smallWorld('firstseason', 'og-1');
+    const i = 10 * w.W + 10;
+    w.L.pine[i] = 0.5;
+    w.L.fir[i] = 0;
+    w.L.aspen[i] = 0;
+    w.L.ageP[i] = 180;
+    w.L.standAge[i] = 180;
+    applyPlanting(w, i, SP.PINE);
+    expect(w.L.standAge[i]).toBe(180); // recruits do not make the stand young
+    applyFireEffects(w, i, 3); // a crown fire kills the stand
+    const sim = new Simulation(w, {}, { ignitions: false, autoReview: true });
+    sim.runDays(31);
+    expect(w.L.standAge[i]).toBeLessThan(1);
   });
 });

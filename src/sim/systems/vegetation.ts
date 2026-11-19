@@ -225,6 +225,13 @@ function updateCell(w: World, i: number, c: VegCache): void {
     const surv = Math.max(0, Math.min(old, nw - recruits));
     return Math.min(600, (surv * (age + dt)) / Math.max(1e-6, surv + Math.min(recruits, nw)));
   };
+  // stand age: years since the last stand-replacing disturbance. Unlike the cohort mean ages it is
+  // not diluted by recruits, so old growth is lost to fire, beetles and cutting, not to seedlings
+  // (v1.0 measured old growth on mean ages, so up to half its reported loss was an artefact)
+  const canopyNow = na + np + nf;
+  L.standAge[i] = canopyNow < 0.12 ? 0 : Math.min(800, L.standAge[i] + dt);
+  // drought memory: a ~2-year moving average of the season's drought stress
+  L.dstress[i] += (stress - L.dstress[i]) / 24;
   L.ageA[i] = ageUpd(a, ageA, recA + suck, na);
   L.ageP[i] = ageUpd(p, ageP, recP, np);
   L.ageF[i] = ageUpd(f, ageF, recF, nf);
@@ -275,6 +282,19 @@ function updateCell(w: World, i: number, c: VegCache): void {
   L.hydro[i] = Math.max(0, L.hydro[i] - L.hydro[i] * 0.55 * dt);
 }
 
+/**
+ * Initial stand age, from the cohort ages generation writes (the oldest well-represented species;
+ * aspen clones count 1.4x, as in v1.0's old-growth test). Also used to fill the layer when a v1.0
+ * save, which has none, is loaded.
+ */
+export function initStandAge(w: World): void {
+  const L = w.L;
+  for (let i = 0; i < w.N; i++) {
+    const can = L.aspen[i] + L.pine[i] + L.fir[i];
+    L.standAge[i] = can < 0.12 ? 0 : Math.max(L.pine[i] > 0.1 ? L.ageP[i] : 0, L.fir[i] > 0.1 ? L.ageF[i] : 0, L.aspen[i] > 0.1 ? L.ageA[i] * 1.4 : 0);
+  }
+}
+
 /** Valley-wide vegetation summary (for stats and scoring). */
 export function vegetationSummary(w: World) {
   const L = w.L;
@@ -292,8 +312,7 @@ export function vegetationSummary(w: World) {
     land++;
     const can = L.aspen[i] + L.pine[i] + L.fir[i];
     if (can > 0.3) forest++;
-    const ageMax = Math.max(L.pine[i] > 0.1 ? L.ageP[i] : 0, L.fir[i] > 0.1 ? L.ageF[i] : 0, L.aspen[i] > 0.1 ? L.ageA[i] * 1.4 : 0);
-    if (ageMax > 150 && can > 0.3) old++;
+    if (L.standAge[i] > 150 && can > 0.3) old++;
     a += L.aspen[i];
     p += L.pine[i];
     f += L.fir[i];

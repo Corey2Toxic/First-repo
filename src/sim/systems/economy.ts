@@ -108,7 +108,7 @@ export function scenicQuality(w: World): number {
     if (c.roadDist[i] > 6 && L.zone[i] !== ZONE.RECREATION) continue;
     n++;
     const can = L.aspen[i] + L.pine[i] + L.fir[i];
-    const old = Math.max(L.ageP[i], L.ageF[i]) > 120 ? 0.25 : 0;
+    const old = L.standAge[i] > 120 && can > 0.3 ? 0.25 : 0;
     s += clamp01(0.35 + can * 0.6 + old + L.aspen[i] * 0.6);
     const yrs = w.yearF - L.lastBurn[i];
     if (yrs >= 0 && yrs < 6 && L.burnSev[i] === 3) scar++;
