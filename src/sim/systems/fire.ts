@@ -101,12 +101,45 @@ export function igniteCell(w: World, i: number, fe: FireEvent, I: number, crown:
   fe.area++;
   if (crown) fe.crownArea++;
   if (I > fe.maxIntensity) fe.maxIntensity = I;
+  extendFireBounds(w, fe, i);
+}
+
+/**
+ * Every cell a fire touches must lie inside its bounding box: the box is what the
+ * end-of-fire sweep releases (BURNT → NONE), what crews and the UI scan, and how
+ * threat to towns is measured. (v1.0 forgot this for burning houses, which then
+ * stayed BURNT forever and came back fireproof when rebuilt.)
+ */
+function extendFireBounds(w: World, fe: FireEvent, i: number): void {
   const x = i % w.W,
     y = (i / w.W) | 0;
   if (x < fe.minX) fe.minX = x;
   if (y < fe.minY) fe.minY = y;
   if (x > fe.maxX) fe.maxX = x;
   if (y > fe.maxY) fe.maxY = y;
+}
+
+/**
+ * Release fire-state left behind by fires that are no longer active (repairs saves
+ * written by v1.0, where burned houses outside a fire's box were never released).
+ * Returns the number of cells repaired.
+ */
+export function releaseOrphanFireCells(w: World): number {
+  const L = w.L;
+  const active = new Set<number>();
+  for (const fe of w.fires) if (fe.active) active.add(fe.id);
+  let n = 0;
+  for (let i = 0; i < w.N; i++) {
+    if (L.fire[i] === FIRE.BURNT && !active.has(L.fid[i])) {
+      L.fire[i] = FIRE.NONE;
+      L.fid[i] = -1;
+      n++;
+    } else if (L.fire[i] === FIRE.NONE && L.fid[i] !== -1 && !active.has(L.fid[i])) {
+      L.fid[i] = -1;
+    }
+  }
+  if (n) w.dirty.fire++;
+  return n;
 }
 
 export function startFire(w: World, i: number, cause: FireCause, projectId = -1, smolder = false): FireEvent | null {
@@ -479,6 +512,7 @@ function igniteStructure(w: World, i: number, fe: FireEvent): void {
   L.crown[i] = 0;
   L.ftime[i] = 6;
   w.burning.push(i);
+  extendFireBounds(w, fe, i);
   const tid = L.town[i] - 1;
   if (tid >= 0 && !fe.threatenedTowns.includes(tid)) fe.threatenedTowns.push(tid);
 }

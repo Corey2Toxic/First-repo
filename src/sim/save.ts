@@ -8,6 +8,7 @@
  */
 import { Rng } from './rng.ts';
 import { LAYER_SPECS, World } from './world.ts';
+import { releaseOrphanFireCells } from './systems/fire.ts';
 import type { LayerName, LayerType } from './world.ts';
 
 export const SAVE_VERSION = 3;
@@ -121,6 +122,8 @@ export function decodeWorld(bytes: Uint8Array): World {
   for (const k of Object.keys(w.dirty) as Array<keyof World['dirty']>) w.dirty[k] = 1000 + w.dirty[k];
   // forward-compatible defaults
   if (w.policies.smokeRules === undefined) w.policies.smokeRules = false;
+  // v1.0 saves can hold burned houses that were never released (fireproof forever): repair them
+  releaseOrphanFireCells(w);
   return w;
 }
 

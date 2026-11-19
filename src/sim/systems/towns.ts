@@ -87,6 +87,11 @@ export function townsYearly(w: World): void {
     for (let i = 0; i < w.N; i++) if (L.town[i] === -(t.id + 1)) burnt.push(i);
     for (const i of burnt) {
       if (r.next() < 0.55) {
+        // never rebuild on a cell a live fire still holds; clear any stale fire state so the
+        // new house can burn again (a BURNT cell is skipped by every spread path)
+        if (L.fire[i] === FIRE.BURNING) continue;
+        L.fire[i] = FIRE.NONE;
+        L.fid[i] = -1;
         L.town[i] = t.id + 1;
         t.structures++;
         w.spend('Other', 0);
