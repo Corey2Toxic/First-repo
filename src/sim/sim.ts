@@ -179,6 +179,8 @@ export class Simulation {
 
   private endOfYear(): void {
     const w = this.w;
+    // the clock has already rolled over: what is recorded here belongs to the closing year
+    w.closingYear = true;
     const c = w.counters;
     const yr = w.year - 1;
     const s = w.stats;
@@ -199,7 +201,7 @@ export class Simulation {
       if (peaks[peaks.length - 1] < ref * 0.55) discover(w, 'snow-drought');
     }
     if (w.climate.yearWet < 0.68) w.record('climate', `A drought year: only ${Math.round(c.yearPrecip)} mm of precipitation fell.`, 2);
-    closeEconomyYear(w);
+    const closedLedger = closeEconomyYear(w);
     townsYearly(w);
     maintainFuelbreaks(w);
     maintainBuffers(w);
@@ -224,7 +226,8 @@ export class Simulation {
     c.yearClosedDays = 0;
     w.memory.fireBanDays = 0;
     if (this.hooks.onNewYear) this.hooks.onNewYear(w);
-    beginReview(w);
+    w.closingYear = false;
+    beginReview(w, closedLedger);
   }
 
   private statsMonthly(): void {

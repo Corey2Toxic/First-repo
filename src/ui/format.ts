@@ -1,5 +1,10 @@
-import { MONTH_NAMES, SEASON_NAMES } from '../sim/types.ts';
+import { DAYS_PER_YEAR, MONTH_NAMES, SEASON_NAMES } from '../sim/types.ts';
 import type { World } from '../sim/world.ts';
+
+/** The tenure year a day belongs to (as w.year counts them): files chronicle entries for the review and almanac. */
+export function yearOfDay(w: World, day: number): number {
+  return w.startYear + Math.floor(day / DAYS_PER_YEAR);
+}
 
 export function money(v: number): string {
   const s = v < 0 ? '−' : '';

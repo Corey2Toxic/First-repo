@@ -11,7 +11,7 @@ import type { CrewKind, Policies } from '../sim/types.ts';
 import { CREW_COST } from '../sim/economyParams.ts';
 import { ledgerTotals } from '../sim/systems/economy.ts';
 import { FIELD_NOTES } from '../sim/notes.ts';
-import { approvalColor, dayToDate, ha, money, pct } from './format.ts';
+import { approvalColor, dayToDate, ha, money, pct, yearOfDay } from './format.ts';
 import { BarChart, LineChart } from './charts.tsx';
 import { canDownload, exportFile, importFile, listSlots, loadSlot, saveToSlot } from '../app/storage.ts';
 import type { SlotInfo } from '../app/storage.ts';
@@ -407,7 +407,7 @@ function AlmanacPanel({ s, close }: { s: GameSession; close: () => void }) {
   const w = s.world;
   const byYear = new Map<number, typeof w.chronicle>();
   for (const c of w.chronicle) {
-    const y = Math.floor(c.day / 360) + 1;
+    const y = yearOfDay(w, c.day);
     if (!byYear.has(y)) byYear.set(y, []);
     byYear.get(y)!.push(c);
   }

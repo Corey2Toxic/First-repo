@@ -20,6 +20,7 @@ import { projectCostPerCell, validProjectCells } from '../sim/systems/projects.t
 import { COST } from '../sim/economyParams.ts';
 import { saveToSlot } from './storage.ts';
 import { Advisor } from './advisor.ts';
+import { FrameClock } from './frameClock.ts';
 import { AudioEngine } from '../audio/audio.ts';
 
 export type ToolId =
@@ -66,6 +67,9 @@ export interface Settings {
   sharp: boolean;
 }
 
+/** Keys that pan or zoom the camera (see keydown and panKeys). */
+const CAMERA_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', '+', '=', '-', '_'];
+
 const TOOL_COLORS: Partial<Record<ToolId, string>> = {
   zone: '#e8e2c0',
   thin: '#7fd18b',
@@ -99,8 +103,8 @@ export class GameSession {
   toasts: Toast[] = [];
   private listeners = new Set<() => void>();
   private raf = 0;
-  private last = 0;
-  private acc = 0;
+  /** Frame timing, the simulation's time accrual and the fps / ticks-per-second counters. */
+  readonly clock = new FrameClock();
   private lastUi = 0;
   private lastLens = 0;
   private lensBuf: Uint8Array;
@@ -113,10 +117,12 @@ export class GameSession {
   private mapCanvas: HTMLCanvasElement;
   private overlayCanvas: HTMLCanvasElement;
   private disposers: Array<() => void> = [];
-  fps = 60;
-  ticksPerSec = 0;
-  private tickCount = 0;
-  private tickWindow = 0;
+  private disposed = false;
+  /**
+   * Camera moves the player made (wheel, pinch, drag-pan, keyboard pan/zoom); programmatic
+   * focus never counts. The tutorial's "Look around" step waits for real input.
+   */
+  camInputs = 0;
   lastSaved = '';
   onEnd: (() => void) | null = null;
 
@@ -126,37 +132,59 @@ export class GameSession {
     this.overlayCanvas = overlayCanvas;
     this.sim = new Simulation(world);
     this.renderer = renderer ?? new MapRenderer(mapCanvas);
-    this.renderer.setWorld(world);
-    this.overlay = new OverlayRenderer(overlayCanvas);
-    this.cam.setGrid(world.W, world.H);
     this.lensBuf = new Uint8Array(world.N * 4);
-    this.renderer.overlayData = this.lensBuf;
-    this.advisor = new Advisor(this);
-    this.audio = new AudioEngine();
-    this.detectedCount = world.fires.filter((f) => f.active && f.detected).length;
-    this.resize();
-    this.cam.fit();
-    this.bindInput();
+    try {
+      this.renderer.setWorld(world);
+      this.overlay = new OverlayRenderer(overlayCanvas);
+      this.cam.setGrid(world.W, world.H);
+      this.renderer.overlayData = this.lensBuf;
+      this.advisor = new Advisor(this);
+      this.audio = new AudioEngine();
+      this.detectedCount = world.fires.filter((f) => f.active && f.detected).length;
+      this.resize();
+      this.cam.fit();
+      this.bindInput();
+    } catch (e) {
+      // a half-built session must not leave listeners or a lens buffer behind on the shared canvases
+      this.dispose();
+      throw e;
+    }
+  }
+
+  get fps(): number {
+    return this.clock.fps;
+  }
+
+  get ticksPerSec(): number {
+    return this.clock.ticksPerSec;
   }
 
   // ------------------------------------------------------------ lifecycle
   start(): void {
-    this.last = performance.now();
+    if (this.disposed) return;
+    this.clock.reset(performance.now());
     const loop = (t: number) => {
+      if (this.disposed) return;
       this.frame(t);
-      this.raf = requestAnimationFrame(loop);
+      if (!this.disposed) this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
   }
 
+  /** Stop the loop and release everything shared with the next screen. Safe to call twice. */
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     cancelAnimationFrame(this.raf);
     // the renderer is shared with the title backdrop and the next session: release our lens buffer
-    if (this.renderer.overlayData === this.lensBuf) this.renderer.overlayData = null;
+    if (this.renderer && this.renderer.overlayData === this.lensBuf) this.renderer.overlayData = null;
     for (const d of this.disposers) d();
     this.disposers = [];
-    this.audio.stop();
+    this.audio?.stop();
     this.listeners.clear();
+    this.onEnd = null;
+    const g = globalThis as unknown as { fireweed?: unknown };
+    if (g.fireweed === this) delete g.fireweed;
   }
 
   subscribe(fn: () => void): () => void {
@@ -189,6 +217,7 @@ export class GameSession {
   setSpeed(s: number): void {
     if (s > 0) this.prevSpeed = s;
     this.speed = s;
+    this.clock.capBacklog(SPEEDS[s] ?? 0);
     this.audio.resume();
     this.emit();
   }
@@ -198,32 +227,24 @@ export class GameSession {
   }
 
   private frame(now: number): void {
-    const dt = Math.min(0.1, (now - this.last) / 1000);
-    this.last = now;
-    this.fps = this.fps * 0.95 + (dt > 0 ? 1 / dt : 60) * 0.05;
+    if (this.disposed) return;
+    const clock = this.clock;
+    // the camera animates with a capped step; the simulation and the counters use real time (D23)
+    const dt = clock.beginFrame(now);
     this.panKeys(dt);
     this.cam.update(dt);
     const w = this.world;
     if (!this.sim.blocked && this.speed > 0 && !this.advisor.blockingStep) {
-      this.acc += dt * SPEEDS[this.speed];
-      const budget = 14;
-      const t0 = performance.now();
-      while (this.acc >= 1 && performance.now() - t0 < budget) {
+      clock.advance(SPEEDS[this.speed], () => {
         this.sim.tick();
-        this.acc -= 1;
-        this.tickCount++;
-        if (this.sim.blocked) break;
+        if (this.sim.blocked) return false;
         if (w.sub === 0 && w.doy % 90 === 0) this.autosave();
-        if (this.checkNewFires()) break;
-      }
-      if (this.acc > 3) this.acc = 3;
+        return !this.checkNewFires();
+      });
+      // time may have been slowed for a new fire: owe no more than the new speed allows
+      clock.capBacklog(SPEEDS[this.speed]);
     }
-    this.tickWindow += dt;
-    if (this.tickWindow > 1) {
-      this.ticksPerSec = this.tickCount / this.tickWindow;
-      this.tickCount = 0;
-      this.tickWindow = 0;
-    }
+    clock.endFrame();
     if (w.outcome.ended && this.onEnd) {
       const f = this.onEnd;
       this.onEnd = null;
@@ -265,8 +286,8 @@ export class GameSession {
       showLabels: this.settings.labels,
       showWildlife: this.settings.wildlife || this.lens === 'wildlife',
       revealFires: this.settings.reveal,
-      tickAlpha: Math.min(1, this.acc),
-      dayAlpha: Math.min(1, (w.sub + Math.min(1, this.acc)) / SUBSTEPS_PER_DAY),
+      tickAlpha: Math.min(1, clock.acc),
+      dayAlpha: Math.min(1, (w.sub + Math.min(1, clock.acc)) / SUBSTEPS_PER_DAY),
       time: now / 1000,
       towerRadius: this.tool.id === 'tower',
     };
@@ -354,6 +375,7 @@ export class GameSession {
     on(window, 'resize', () => this.resize());
     on(el, 'wheel', (e: WheelEvent) => {
       e.preventDefault();
+      this.camInputs++;
       const r = el.getBoundingClientRect();
       this.cam.zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0016));
     }, { passive: false });
@@ -375,6 +397,7 @@ export class GameSession {
         }
         this.dragging = null;
         this.pinch = this.pinchState();
+        this.camInputs++;
         return;
       }
       const painting = e.button === 0 && this.toolPaints();
@@ -405,7 +428,10 @@ export class GameSession {
       if (d) {
         const dx = x - d.x,
           dy = y - d.y;
-        if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
+        if (!d.moved && Math.abs(dx) + Math.abs(dy) > 3) {
+          d.moved = true;
+          if (!d.painting) this.camInputs++; // a drag-pan begins
+        }
         if (d.painting) this.pointerPaint(x, y, e.shiftKey, false);
         else if (d.moved) {
           this.cam.panPixels(dx, dy);
@@ -601,6 +627,7 @@ export class GameSession {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     const k = e.key.toLowerCase();
     this.keys.add(k);
+    if (!e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && CAMERA_KEYS.includes(k)) this.camInputs++;
     if (k === ' ') {
       e.preventDefault();
       this.togglePause();

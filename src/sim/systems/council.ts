@@ -6,7 +6,7 @@
  */
 import { clamp, clamp01 } from '../grid.ts';
 import { FACTIONS, FACTION_NAMES, ZONE } from '../types.ts';
-import type { FactionId, Petition, PetitionAction } from '../types.ts';
+import type { FactionId, LedgerYear, Petition, PetitionAction } from '../types.ts';
 import { bestCampSite, buildCampground, campSiteValid, econCache, ledgerTotals } from './economy.ts';
 import { vegetationSummary } from './vegetation.ts';
 import { createProject } from './projects.ts';
@@ -469,10 +469,15 @@ export function budgetFor(w: World): number {
   return Math.round(1_020_000 * diff * (0.55 + 0.9 * (trust / 100)) * (0.85 + 0.15 * (pop / 3400)));
 }
 
-export function beginReview(w: World): void {
+/**
+ * Open the annual review of the year that just ended. `closed` is that year's ledger as
+ * archived by closeEconomyYear, which runs first and leaves e.ledger empty for the new year
+ * (v1.0 totalled the fresh ledger and reported $0k / $0k every year).
+ */
+export function beginReview(w: World, closed: LedgerYear = w.economy.history.at(-1) ?? w.economy.ledger): void {
   const r = w.review;
   const e = w.economy;
-  const tot = ledgerTotals(e.ledger);
+  const tot = ledgerTotals(closed);
   const yr = w.year - 1;
   const trust = w.trust;
   r.pending = true;

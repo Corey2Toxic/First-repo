@@ -6,8 +6,10 @@
 import type { GameSession } from './session.ts';
 import type { Command, CommandResult } from '../sim/commands.ts';
 import { ZONE } from '../sim/types.ts';
-import { startFire } from '../sim/systems/fire.ts';
-import { cellFuel, hazardIndex } from '../sim/systems/fuels.ts';
+import type { FireEvent } from '../sim/types.ts';
+import type { World } from '../sim/world.ts';
+import { hazardIndex } from '../sim/systems/fuels.ts';
+import { lessonFireFallback, lessonFireWeather, tutorialFireCell } from '../sim/tutorial.ts';
 import { burnWindowOpen } from '../sim/systems/projects.ts';
 import { deerCount } from '../sim/systems/wildlife.ts';
 
@@ -26,27 +28,41 @@ export interface AdvisorCard {
 interface Step extends AdvisorCard {
   done: (s: GameSession) => boolean;
   onEnter?: (s: GameSession) => void;
+  /** Card fields that follow the state of the valley while the step is shown. */
+  live?: (s: GameSession) => Partial<AdvisorCard>;
 }
+
+/** A wildfire someone has reported (not a burn the crews lit). */
+function reportedWildfire(w: World): FireEvent | undefined {
+  return w.fires.find((f) => f.active && f.detected && f.cause !== 'prescribed' && f.cause !== 'pile');
+}
+
+/** Real camera moves (wheel, pinch, drag, keys) that complete the "Look around" step. */
+const LOOK_AROUND_INPUTS = 2;
 
 export class Advisor {
   private s: GameSession;
   private steps: Step[] = [];
   private stepIdx = 0;
   private stepStartDay = 0;
-  private camStart: [number, number, number] = [0, 0, 0];
+  /** session.camInputs when the step began (programmatic focus never moves it). */
+  private camInputsAtEntry = 0;
   card: AdvisorCard | null = null;
   tip: AdvisorCard | null = null;
   private lastTipAt = 0;
   private dismissed = new Set<string>();
   tutorial: boolean;
   private acked = false;
-  private forcedFire = false;
+  /** The fire the tutorial teaches with (-1: none could be lit). */
+  private lessonFireId = -1;
+  /** A response was chosen for a fire during the current step. */
+  private responded = false;
 
   constructor(s: GameSession) {
     this.s = s;
     const w = s.world;
-    this.tutorial = w.config.tutorial && w.day < 5;
-    const town = w.towns[0];
+    this.tutorial = w.config.tutorial && w.day < 5 && w.towns.length > 0;
+    const town = w.towns[0] ?? { name: 'town', x: w.W >> 1, y: w.H >> 1 };
     this.steps = [
       {
         id: 'welcome',
@@ -62,7 +78,9 @@ export class Advisor {
         body: `Drag the map to pan, scroll to zoom. Zoom in on ${town.name} — you will see individual trees, roofs and roads. Lookout towers, campgrounds, crews and wildlife are marked.`,
         action: 'Next',
         focus: [town.x, town.y],
-        done: (s) => this.acked || Math.abs(s.cam.scale - this.camStart[2]) > this.camStart[2] * 0.6,
+        // only the player's own camera moves count: the step's focus on the town (or "Show me")
+        // zooms programmatically, which v1.0 mistook for the player looking around
+        done: (s) => this.acked || s.camInputs - this.camInputsAtEntry >= LOOK_AROUND_INPUTS,
       },
       {
         id: 'lens',
@@ -89,17 +107,25 @@ export class Advisor {
       {
         id: 'time',
         title: 'Let time run',
-        body: 'Press Play or Space. Speeds 1–4 run from "watch the fire" to "skip the winter". Time slows by itself when a new fire is reported.',
+        body: 'Press Play or Space. Speeds 1–4 run from "watch the fire" to "skip the winter". Run time on into summer: fire season comes as the grass cures and the danger rating in the top bar climbs to High. Time slows by itself when a new fire is reported.',
         highlight: 'speed',
-        done: (s) => s.world.day - this.stepStartDay > 12,
+        // the lesson waits for fire weather (v1.0 struck 12 days in, in early spring, and the fire
+        // died within hours): a fire reported meanwhile, a High-danger summer or autumn afternoon,
+        // or any dry afternoon late in the summer
+        done: (s) => {
+          const w = s.world;
+          if (w.day - this.stepStartDay < 1) return false;
+          return !!reportedWildfire(w) || lessonFireWeather(w) || lessonFireFallback(w);
+        },
       },
       {
         id: 'fire',
         title: 'Fire!',
         body: 'A fire has been reported. Click it to open its card. Choose how to respond: Suppress (all-out attack), Contain (protect values, let the rest burn), or Monitor (let it do its work). Every choice has a price.',
         action: 'Next',
-        done: (s) => this.acked || s.selection?.type === 'fire',
+        done: () => this.acked || this.responded,
         onEnter: (s) => this.ensureFire(s),
+        live: (s) => this.fireCard(s),
       },
       {
         id: 'crews',
@@ -137,8 +163,9 @@ export class Advisor {
   private enter(k: number): void {
     this.stepIdx = k;
     this.acked = false;
+    this.responded = false;
     this.stepStartDay = this.s.world.day;
-    this.camStart = [this.s.cam.cx, this.s.cam.cy, this.s.cam.scale];
+    this.camInputsAtEntry = this.s.camInputs;
     const st = this.steps[k];
     if (!st) {
       this.card = null;
@@ -147,6 +174,7 @@ export class Advisor {
     }
     this.card = { id: st.id, title: st.title, body: st.body, action: st.action, blocking: st.blocking, focus: st.focus, highlight: st.highlight };
     if (st.onEnter) st.onEnter(this.s);
+    if (st.live) Object.assign(this.card, st.live(this.s));
     if (st.focus) this.s.focus(st.focus[0], st.focus[1], 10);
   }
 
@@ -172,6 +200,7 @@ export class Advisor {
     if (!res.ok) return;
     if (cmd.t === 'zone' && cmd.zone === ZONE.BUFFER) this.zoned = true;
     if (cmd.t === 'project') this.treated = true;
+    if (cmd.t === 'fireResponse') this.responded = true;
   }
 
   /** Called a few times per second by the session. */
@@ -180,45 +209,58 @@ export class Advisor {
     if (this.tutorial) {
       const st = this.steps[this.stepIdx];
       if (st && st.done(s)) this.enter(this.stepIdx + 1);
+      else if (st?.live && this.card) Object.assign(this.card, st.live(s));
       return;
     }
     this.contextTip();
   }
 
-  /** The tutorial guarantees a first fire: a summer storm strikes a ridge near town. */
+  /**
+   * The tutorial guarantees a first fire: a fire already reported if there is one, otherwise
+   * one lit through the logged 'tutorialIgnition' command (so replays reproduce it) where
+   * today's fire weather would carry it. The simulation words the notice from the real
+   * season and weather and blames lightning only when a storm is overhead.
+   */
   private ensureFire(s: GameSession): void {
     const w = s.world;
-    if (this.forcedFire || w.fires.some((f) => f.active && f.detected && f.cause !== 'prescribed')) return;
-    this.forcedFire = true;
-    const t = w.towns[0];
-    let best = -1,
-      bs = -Infinity;
-    for (let k = 0; k < 400; k++) {
-      const a = (k * 2.399) % (Math.PI * 2),
-        d = 14 + (k % 12);
-      const x = Math.round(t.x + Math.cos(a) * d),
-        y = Math.round(t.y + Math.sin(a) * d);
-      if (!w.inside(x, y)) continue;
-      const i = y * w.W + x;
-      if (w.L.water[i] || w.L.town[i]) continue;
-      const f = cellFuel(w, i);
-      const sc = f.fine + w.L.elev[i] / 400 - Math.abs(d - 18);
-      if (sc > bs) {
-        bs = sc;
-        best = i;
-      }
+    const reported = reportedWildfire(w);
+    const lit = w.memory.tutorialFireId !== undefined ? w.fires.find((f) => f.id === w.memory.tutorialFireId) : undefined;
+    let fe = reported ?? lit;
+    if (!fe && w.memory.tutorialFireId === undefined) {
+      const cell = tutorialFireCell(w);
+      if (cell >= 0 && s.command({ t: 'tutorialIgnition', cell }, true).ok) fe = w.fires.find((f) => f.id === w.memory.tutorialFireId);
     }
-    if (best < 0) return;
-    // dry the spot a little so the lesson is visible, then strike it
-    w.L.fm[best] = Math.min(w.L.fm[best], 0.07);
-    const fe = startFire(w, best, 'lightning');
-    if (fe) {
-      fe.detected = true;
-      fe.detectedDay = w.day;
-      fe.detectedBy = 'the lookout';
-      w.notify(`A summer thunderstorm struck near ${t.name}: the ${fe.name} has been reported by the lookout.`, 'danger', fe.originX, fe.originY, fe.id);
-      s.focus(fe.originX, fe.originY, 12);
+    this.lessonFireId = fe ? fe.id : -1;
+    if (fe && fe.active) s.focus(fe.originX, fe.originY, 12);
+  }
+
+  /** The "Fire!" card tells the truth about the lesson fire, and holds time only while it burns. */
+  private fireCard(s: GameSession): Partial<AdvisorCard> {
+    const w = s.world;
+    const choose = 'Choose how to respond: Suppress (all-out attack), Contain (protect values, let the rest burn), or Monitor (let it do its work). Every choice has a price.';
+    const fe = this.lessonFireId >= 0 ? w.fires.find((f) => f.id === this.lessonFireId) : undefined;
+    if (fe && fe.active)
+      return {
+        body: `The ${fe.name} has been reported. Click it on the map to open its card. ${choose} Time is held until you choose.`,
+        blocking: true,
+        focus: [fe.originX, fe.originY],
+      };
+    const next = reportedWildfire(w);
+    if (next) {
+      this.lessonFireId = next.id;
+      return this.fireCard(s);
     }
+    if (fe)
+      return {
+        body: `The ${fe.name} is already out, at ${fe.area} ha: many fires in this valley die young, as fuel moisture, wind and the hour decide. When the next one is reported, click it to open its card. ${choose}`,
+        blocking: false,
+        focus: undefined,
+      };
+    return {
+      body: `No fire has taken hold yet: the fuels near ${w.towns[0]?.name ?? 'town'} are too damp to carry one. When a fire is reported, click it to open its card. ${choose}`,
+      blocking: false,
+      focus: undefined,
+    };
   }
 
   private contextTip(): void {

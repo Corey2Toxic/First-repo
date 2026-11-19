@@ -13,6 +13,10 @@ How the game was verified, what each check covers, and what was found along the 
 | `tests/sim/determinism.test.ts` | Two runs from the same seed produce identical state hashes after 200 days; a run with the same player command sequence replays identically; a game saved and reloaded at day 150 continues bit-for-bit like the original for another 120 days. |
 | `tests/sim/ecology.test.ts` | Without fire, fir gains on aspen over 20 years and fuel hazard does not fall (succession / fire exclusion); aspen clones resprout within two years after severe fire; with wolves, deer numbers and browse pressure are lower than without (trophic cascade, 12-year paired runs); bark beetles kill more pine after a mild winter than after a cold one. |
 | `tests/sim/society.test.ts` | The ledger accounts for every dollar; commands validate, apply and charge exactly (crew hire, zoning, roads refused into Wilderness, per-drop air-tanker cost, burns cost nothing until done, invalid commands have no side effects); petitions arise from real grievances (Silent Woods → conservationists ask for wolves); a warden below the trust threshold twice is dismissed with a scored legacy; **every scenario runs 30 years** with no non-finite values, bounded vegetation and approvals, and within a time budget. |
+| `tests/sim/review.test.ts` | The council review reports the reviewed year's income and spending (equal to the archived ledger, never $0k / $0k); year-end chronicle entries (drought, mill closure, petitions answered at the review) are filed under the closing year; "Keep playing" after the legacy report is a logged command that books any debt write-off as income, makes the skipped allocation and resets the low-trust count. |
+| `tests/sim/tutorial.test.ts` | The tutorial's lesson fire never comes in spring; it is lit by a validated, logged command on ground today's fire weather would carry, without doctoring fuel moisture; the notice names the real season and blames lightning only under a storm; it replays identically; it is refused outside the guided first season, off the map, or twice. |
+| `tests/unit/frameClock.test.ts` | Game-loop clocks: 250 ms frames read ≈ 4 fps (not 10) and ticks/s equals ticks run per real second; 60 fps behaviour is unchanged; after a 5 s gap at most a quarter second of ticks runs and the counters ignore the gap. |
+| `tests/unit/advisor.test.ts` | The guided first season through a stand-in session: "Look around" ignores the tutorial's own zoom and waits for two real camera inputs; the fire lesson waits for fire weather, lights its fire through the command log and holds time until a response is chosen; with nothing able to burn the card says so, does not block, and adopts the next reported fire. |
 
 ### `npm run build && npm run test:e2e` — Playwright, production build
 
@@ -21,9 +25,12 @@ title menu → six scenarios → custom small valley generated from a typed seed
 varied image (pixel readback) → paint a Community Buffer with the zone brush → queue a thinning project
 → hire a crew from the Crews panel → change a policy → time advances at speed 4 → lenses toggle → seven
 panels open → the council review appears at year end, a petition is answered, year 2 begins → save,
-quit to title, Continue → the saved game is restored → **no console errors** throughout (21 checks).
+quit to title, Continue → the saved game is restored → quit to title again → a default-size (medium)
+valley with the hazard lens on → quit to title → another medium valley with a lens → load the small
+save from its menu (restored and drawn) → lens on → quit to title; every quit must bring the title back
+within 15 s with no session left behind → **no console errors** throughout (27 checks).
 
-`npm run test:e2e -- dist-single/fireweed-hosted.html` runs the same 21 checks against the hosted
+`npm run test:e2e -- dist-single/fireweed-hosted.html` runs the same 27 checks against the hosted
 single-file variant, served inside a minimal stand-in for a host's document wrapper.
 
 ### `node scripts/phone-check.ts` — phone-size layout

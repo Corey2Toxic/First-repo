@@ -3,7 +3,7 @@
  */
 import type { GameSession } from '../app/session.ts';
 import { FACTIONS, FACTION_NAMES } from '../sim/types.ts';
-import { approvalColor, money } from './format.ts';
+import { approvalColor, money, yearOfDay } from './format.ts';
 
 const VERDICTS: Record<string, [string, string]> = {
   praise: ['The council is pleased.', 'Your stewardship has earned real confidence. Keep it.'],
@@ -18,7 +18,8 @@ export function ReviewModal({ s }: { s: GameSession }) {
   const w = s.world;
   const r = w.review;
   const [head, sub] = VERDICTS[r.verdict] ?? VERDICTS.ok;
-  const highlights = w.chronicle.filter((c) => Math.floor(c.day / 360) + 1 === r.year && c.importance >= 2).slice(-6);
+  // year-end entries are filed under the closing year (World.record), so they show in its review
+  const highlights = w.chronicle.filter((c) => yearOfDay(w, c.day) === r.year && c.importance >= 2).slice(-6);
   const ends = r.verdict === 'dismissed' || r.verdict === 'bankrupt' || r.verdict === 'tenure';
   const reserve = 0.35 * r.budgetNext;
   const returned = Math.max(0, w.economy.funds - reserve);

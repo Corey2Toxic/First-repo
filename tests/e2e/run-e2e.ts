@@ -66,6 +66,57 @@ const W = () => page.evaluate(() => {
   const w = s.world;
   return { day: w.day, sub: w.sub, zones: Array.from(w.L.zone as Uint8Array).filter((z) => z === 5).length, projects: w.projects.length, crews: w.crews.length, review: w.review.pending, speed: s.speed };
 });
+/** Mean brightness and distinct colours of a row of map pixels at the centre of the screen. */
+const mapPixels = () =>
+  page.evaluate(() => {
+    const c = document.getElementById('map') as HTMLCanvasElement;
+    const gl = c.getContext('webgl2')!;
+    const buf = new Uint8Array(4 * 64);
+    gl.readPixels(Math.floor(c.width / 2) - 32, Math.floor(c.height / 2), 64, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    let sum = 0;
+    const distinct = new Set<number>();
+    for (let k = 0; k < 64; k++) {
+      sum += buf[k * 4] + buf[k * 4 + 1] + buf[k * 4 + 2];
+      distinct.add((buf[k * 4] << 16) | (buf[k * 4 + 1] << 8) | buf[k * 4 + 2]);
+    }
+    return { mean: sum / 64 / 3, distinct: distinct.size };
+  });
+const openMenu = async () => {
+  await page.click('.topbar .btn.ghost');
+  await page.waitForSelector('.drawer .btn:has-text("Quit to title")');
+};
+/** Quit through the in-game menu; the title must be back within 15 s with no page errors (D21). */
+const quitToTitle = async (label: string) => {
+  const before = errors.length;
+  await openMenu();
+  const t0 = Date.now();
+  await page.click('.drawer .btn:has-text("Quit to title")');
+  const back = await page
+    .waitForSelector('.logo', { timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+  const secs = ((Date.now() - t0) / 1000).toFixed(1);
+  const gone = await page.evaluate(() => (window as any).fireweed === undefined);
+  check(back && gone && errors.length === before, `${label}: title back in ${secs} s, no session left behind, no page errors${errors.length > before ? ': ' + errors.slice(before, before + 2).join(' | ') : ''}`);
+};
+/** Begin a non-tutorial valley of the default (medium) size from the title screen. */
+const startMediumValley = async (seed: string) => {
+  await page.click('text=New valley');
+  await page.waitForSelector('.scenarios');
+  await page.click('.scenario:has-text("The Tinderbox")');
+  await page.fill('input[type="text"]', seed);
+  await page.click('text=Begin tenure');
+  await page.waitForFunction(() => (window as any).fireweed?.world?.W === 240, null, { timeout: 120000 });
+};
+/** Turn on the fuel hazard lens and let the game draw it for a moment. */
+const hazardLens = async () => {
+  if (await page.isVisible('.drawer')) await page.click('.drawer .close');
+  await page.click('#lens-hazard');
+  await page.evaluate(() => (window as any).fireweed.setSpeed(2));
+  await page.waitForTimeout(1500);
+  await page.evaluate(() => (window as any).fireweed.setSpeed(0));
+  return page.evaluate(() => (window as any).fireweed.lens === 'hazard');
+};
 
 try {
   console.log('Title screen');
@@ -92,19 +143,7 @@ try {
   check(info.seed === 'e2e-seed-42' && info.W === 176, `custom small valley generated (${info.valley})`);
 
   console.log('Rendering');
-  const px = await page.evaluate(() => {
-    const c = document.getElementById('map') as HTMLCanvasElement;
-    const gl = c.getContext('webgl2')!;
-    const buf = new Uint8Array(4 * 64);
-    gl.readPixels(Math.floor(c.width / 2) - 32, Math.floor(c.height / 2), 64, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-    let sum = 0,
-      distinct = new Set<number>();
-    for (let k = 0; k < 64; k++) {
-      sum += buf[k * 4] + buf[k * 4 + 1] + buf[k * 4 + 2];
-      distinct.add((buf[k * 4] << 16) | (buf[k * 4 + 1] << 8) | buf[k * 4 + 2]);
-    }
-    return { mean: sum / 64 / 3, distinct: distinct.size };
-  });
+  const px = await mapPixels();
   check(px.mean > 20 && px.distinct > 8, `map renders a varied landscape (mean ${px.mean.toFixed(0)}, ${px.distinct} colours)`);
 
   console.log('Player actions');
@@ -191,7 +230,7 @@ try {
   await page.waitForTimeout(300);
   await page.click('.topbar .btn.ghost');
   await page.click('.drawer .btn:has-text("Save game")');
-  await page.waitForSelector('.drawer :text("Saved.")', { timeout: 20000 });
+  await page.waitForSelector('.drawer :text("Saved.")', { timeout: 60000 });
   const savedDay = (await W()).day;
   await page.click('.drawer .btn:has-text("Quit to title")');
   await page.waitForSelector('.logo', { timeout: 60000 });
@@ -200,6 +239,31 @@ try {
   await page.waitForTimeout(800);
   const loaded = await W();
   check(Math.abs(loaded.day - savedDay) <= 1 && loaded.crews === 4, `saved game restored (day ${loaded.day}, ${loaded.crews} crews)`);
+
+  // D21: v1.0 crashed (RangeError, UI gone for good) going back to the small title valley from a
+  // medium game with a lens on, and loading a smaller save from inside a larger game is the same hazard
+  console.log('Screen changes across valley sizes');
+  await quitToTitle('small valley → title');
+  await startMediumValley('e2e-medium-7');
+  check(await hazardLens(), 'default-size (medium) valley begun, hazard lens on');
+  await quitToTitle('medium valley with a lens → title');
+  await startMediumValley('e2e-medium-8');
+  await hazardLens();
+  const beforeLoad = errors.length;
+  await openMenu();
+  const loadManual = '.drawer .row:has-text("manual") .btn:has-text("Load")';
+  await page.waitForSelector(loadManual, { timeout: 20000 });
+  await page.click(loadManual);
+  await page.waitForFunction(() => (window as any).fireweed?.world?.W === 176, null, { timeout: 60000 });
+  await page.waitForTimeout(1000);
+  const small = await W();
+  const px2 = await mapPixels();
+  check(
+    Math.abs(small.day - savedDay) <= 1 && px2.mean > 20 && px2.distinct > 8 && errors.length === beforeLoad,
+    `small save loaded from inside a medium game and drawn (day ${small.day}, ${px2.distinct} colours)`,
+  );
+  check(await hazardLens(), 'lens works in the loaded small valley');
+  await quitToTitle('loaded small valley with a lens → title');
 } catch (e) {
   failures++;
   console.log('  ✗ exception: ' + (e as Error).message);
