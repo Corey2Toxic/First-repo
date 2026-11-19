@@ -53,6 +53,36 @@ describe('economy, commands and politics', () => {
     expect(applyCommand(w, { t: 'build', what: 'tower', cell: w.reservoirCells[0] }).ok).toBe(false);
   });
 
+  it('malformed commands are refused with no side effects (D12, D13, D7)', () => {
+    const w = smallWorld('firstseason', 'cmd-hard');
+    const before = JSON.stringify(w.policies);
+    const f0 = w.economy.funds;
+    // out-of-range policy values (v1.0: grazing 'extreme' NaN-poisoned the grazing layer)
+    expect(applyCommand(w, { t: 'policy', key: 'grazing', value: 'extreme' } as never).ok).toBe(false);
+    expect(applyCommand(w, { t: 'policy', key: 'harvest', value: 'max' } as never).ok).toBe(false);
+    expect(applyCommand(w, { t: 'policy', key: 'noSuchPolicy', value: true } as never).ok).toBe(false);
+    expect(applyCommand(w, { t: 'policy', key: 'airPatrol', value: 'yes' } as never).ok).toBe(false);
+    expect(JSON.stringify(w.policies)).toBe(before);
+    expect(applyCommand(w, { t: 'policy', key: 'grazing', value: 'heavy' }).ok).toBe(true);
+    // off-grid or fractional cells (v1.0: A* path reconstruction looped until out of memory)
+    const c = w.crews[0];
+    for (const cell of [-5, w.N + 7, 12.5, NaN]) {
+      expect(applyCommand(w, { t: 'sendCrew', crewId: c.id, cell }).ok).toBe(false);
+      expect(applyCommand(w, { t: 'build', what: 'tower', cell }).ok).toBe(false);
+      expect(applyCommand(w, { t: 'reintroduceWolves', cell }).ok).toBe(false);
+    }
+    expect(applyCommand(w, { t: 'zone', cells: [0, -1], zone: ZONE.BUFFER }).ok).toBe(false);
+    expect(applyCommand(w, { t: 'zone', cells: [0], zone: 99 }).ok).toBe(false);
+    expect(applyCommand(w, { t: 'hire', kind: 'tank' } as never).ok).toBe(false);
+    expect(applyCommand(w, { t: 'fireResponse', fireId: 1, response: 'ignore' } as never).ok).toBe(false);
+    expect(w.economy.funds).toBe(f0);
+    expect(w.crews[0].state).toBe(c.state);
+    // one campground per site (v1.0 stacked ten on one hectare for ten times the visitors)
+    const camp = w.camps[0];
+    expect(applyCommand(w, { t: 'build', what: 'camp', cell: camp }).ok).toBe(false);
+    expect(applyCommand(w, { t: 'build', what: 'camp', cell: camp + 1 }).ok).toBe(false);
+  });
+
   it('petitions arise from real grievances', () => {
     const w = smallWorld('silentwoods', 'pet-1');
     w.memory.lastPetitionYear = {};

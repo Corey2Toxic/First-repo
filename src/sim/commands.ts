@@ -4,7 +4,7 @@
  * world, charges its cost, and logs it (enabling replays and tests).
  */
 import { astar } from './grid.ts';
-import { FIRE, INFRA, ZONE } from './types.ts';
+import { FIRE, INFRA, SP, ZONE } from './types.ts';
 import type { CrewKind, FireResponse, Policies, ProjectKind } from './types.ts';
 import { COST, CREW_COST } from './economyParams.ts';
 import { cancelProject, createProject, zoneConflict } from './systems/projects.ts';
@@ -71,7 +71,96 @@ function roadCostNoWild(w: World) {
   return (a: number, b: number, d: boolean) => (w.L.zone[b] === ZONE.WILDERNESS || w.L.town[b] < 0 ? Infinity : base(a, b, d));
 }
 
+/** Allowed values for every policy (the UI offers exactly these). */
+export const POLICY_VALUES: { [K in keyof Policies]: ReadonlyArray<Policies[K]> } = {
+  fireBan: ['auto', 'summer', 'never'],
+  wolfPolicy: ['protected', 'managed', 'bounty'],
+  hunting: ['none', 'moderate', 'heavy'],
+  grazing: ['none', 'light', 'heavy'],
+  harvest: ['low', 'medium', 'high'],
+  harvestMethod: ['selective', 'clearcut'],
+  slash: ['leave', 'pileburn'],
+  buildingCode: ['standard', 'firewise'],
+  growthBoundary: [false, true],
+  airPatrol: [false, true],
+  autoDispatch: [false, true],
+  salvage: [false, true],
+  smokeRules: [false, true],
+};
+const PROJECT_KINDS: readonly ProjectKind[] = ['thin', 'burn', 'plant', 'fuelbreak'];
+const RESPONSES: readonly FireResponse[] = ['suppress', 'contain', 'monitor'];
+const CREW_KINDS: readonly CrewKind[] = ['hand', 'engine', 'heli'];
+const ZONES = Object.values(ZONE) as number[];
+const MAX_CELLS = 250_000;
+
+const isCell = (w: World, i: unknown): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < w.N;
+const isId = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * Structural validation of a command before anything is applied. Commands come from the UI,
+ * but also from replays, bots and tests, so nothing about their shape is trusted: an invalid
+ * command is refused with no side effects instead of poisoning the world (v1.0 applied policy
+ * values unchecked — grazing 'extreme' turned 21,673 cells into NaN — and an off-grid crew target
+ * hung the path-finder).
+ */
+export function validateCommand(w: World, cmd: Command): string | null {
+  if (!cmd || typeof cmd !== 'object') return 'Malformed command.';
+  const cellsOk = (cells: unknown) => Array.isArray(cells) && cells.length <= MAX_CELLS && cells.every((c) => isCell(w, c));
+  switch (cmd.t) {
+    case 'zone':
+      if (!ZONES.includes(cmd.zone)) return 'Unknown zone.';
+      return cellsOk(cmd.cells) ? null : 'Invalid cells.';
+    case 'project':
+      if (!PROJECT_KINDS.includes(cmd.kind)) return 'Unknown treatment.';
+      if (cmd.species !== undefined && ![SP.ASPEN, SP.PINE, SP.FIR].includes(cmd.species as 2 | 3 | 4)) return 'Unknown species.';
+      return cellsOk(cmd.cells) ? null : 'Invalid cells.';
+    case 'cancelProject':
+    case 'dismiss':
+    case 'recallCrew':
+      return isId((cmd as { id?: number; crewId?: number }).id ?? (cmd as { crewId?: number }).crewId) ? null : 'Invalid id.';
+    case 'fireResponse':
+      if (!RESPONSES.includes(cmd.response)) return 'Unknown response.';
+      return isId(cmd.fireId) ? null : 'Invalid fire.';
+    case 'sendCrew':
+      if (!isId(cmd.crewId)) return 'Invalid crew.';
+      if (cmd.fireId !== undefined && !isId(cmd.fireId)) return 'Invalid fire.';
+      if (cmd.projectId !== undefined && !isId(cmd.projectId)) return 'Invalid project.';
+      if (cmd.cell !== undefined && !isCell(w, cmd.cell)) return 'That place is off the map.';
+      return null;
+    case 'fireline':
+      if (cmd.crewId !== undefined && !isId(cmd.crewId)) return 'Invalid crew.';
+      return cellsOk(cmd.cells) ? null : 'Invalid cells.';
+    case 'airdrop':
+      return cellsOk(cmd.cells) ? null : 'Invalid cells.';
+    case 'build':
+      if (cmd.what !== 'tower' && cmd.what !== 'camp') return 'Unknown structure.';
+      return isCell(w, cmd.cell) ? null : 'That place is off the map.';
+    case 'road':
+      return isCell(w, cmd.from) && isCell(w, cmd.to) ? null : 'That place is off the map.';
+    case 'hire':
+      if (!CREW_KINDS.includes(cmd.kind)) return 'Unknown crew type.';
+      if (cmd.townId !== undefined && !(Number.isInteger(cmd.townId) && cmd.townId >= 0 && cmd.townId < w.towns.length)) return 'No such town.';
+      return null;
+    case 'policy': {
+      if (!Object.prototype.hasOwnProperty.call(POLICY_VALUES, cmd.key)) return 'Unknown policy.';
+      const allowed = POLICY_VALUES[cmd.key] as ReadonlyArray<string | boolean>;
+      return allowed.includes(cmd.value) ? null : 'That is not an option for this policy.';
+    }
+    case 'reintroduceWolves':
+    case 'relocateBeavers':
+      return isCell(w, cmd.cell) ? null : 'That place is off the map.';
+    case 'petition':
+      return isId(cmd.id) && typeof cmd.accept === 'boolean' ? null : 'Invalid petition answer.';
+    case 'closeReview':
+      return null;
+    default:
+      return 'Unknown command.';
+  }
+}
+
 export function applyCommand(w: World, cmd: Command): CommandResult {
+  const invalid = validateCommand(w, cmd);
+  if (invalid) return fail(invalid);
   const res = apply(w, cmd);
   if (res.ok) w.commandLog.push({ day: w.day, sub: w.sub, cmd });
   if (w.commandLog.length > 5000) w.commandLog.splice(0, w.commandLog.length - 5000);
@@ -215,6 +304,9 @@ function apply(w: World, cmd: Command): CommandResult {
         }
       if (!nearRoad) return fail('Campgrounds need a road within 400 m.');
       if (L.zone[i] === ZONE.WILDERNESS) return fail('No developed campgrounds in wilderness.');
+      // one campground per site: v1.0 let ten be stacked on one hectare for ten times the visitors
+      if (w.camps.some((c) => Math.hypot((c % w.W) - (i % w.W), ((c / w.W) | 0) - ((i / w.W) | 0)) < 4))
+        return fail('Too close to an existing campground.');
       L.infra[i] |= INFRA.CAMP;
       w.camps.push(i);
       w.spend('Infrastructure', COST.camp);

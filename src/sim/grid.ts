@@ -152,8 +152,11 @@ export function astar(
   heuristicScale = 1,
   maxExpand = 200000,
 ): number[] | null {
-  if (start === goal) return [];
   const N = W * H;
+  // off-grid or fractional endpoints have no cell: refuse them (v1.0 looped forever rebuilding
+  // the path from an index outside the arrays, growing it until the process ran out of memory)
+  if (!Number.isInteger(start) || !Number.isInteger(goal) || start < 0 || goal < 0 || start >= N || goal >= N) return null;
+  if (start === goal) return [];
   const g = new Float32Array(N).fill(Infinity);
   const came = new Int32Array(N).fill(-1);
   const closed = new Uint8Array(N);
@@ -195,7 +198,7 @@ export function astar(
   if (came[goal] === -1) return null;
   const path: number[] = [];
   let c = goal;
-  while (c !== start && c !== -1) {
+  for (let guard = 0; c !== start && c !== -1 && guard <= N; guard++) {
     path.push(c);
     c = came[c];
   }
