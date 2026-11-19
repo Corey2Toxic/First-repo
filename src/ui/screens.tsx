@@ -22,8 +22,8 @@ export function TitleScreen(props: { onNew: () => void; onContinue: (slot: strin
       <div class="title-wrap" style={{ position: 'relative' }}>
         <div class="logo">FIREWEED</div>
         <div class="subtitle">A century of fire, forest, wildlife — and the people in between.</div>
-        <div class="faint" style={{ fontSize: '11.5px', marginTop: '6px', letterSpacing: '0.08em' }}>
-          v{GAME_VERSION}
+        <div style={{ fontSize: '12px', marginTop: '8px', letterSpacing: '0.12em', color: '#e8dcc0', opacity: 0.75, textShadow: '0 2px 8px rgba(0, 0, 0, 0.8)' }}>
+          VERSION {GAME_VERSION}
         </div>
         <div class="menu" style={{ marginTop: '18px' }}>
           <button class="btn primary" onClick={props.onNew} autofocus>
