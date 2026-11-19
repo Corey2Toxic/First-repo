@@ -122,6 +122,33 @@ describe('ecology', () => {
     expect(one - thirty).toBeGreaterThan(0.05); // v1.0: identical whatever the crowding
   });
 
+  it('deer cannot live on a burn scar they have already eaten bare', () => {
+    // v1.1's first deer model gave recently burned ground a flat forage bonus that eating never used
+    // up, so once fires had burned a large share of the valley deer irrupted to ~100/km²
+    const w = smallWorld('firstseason', 'scar-forage');
+    w.packs = [];
+    const h = w.herds[0];
+    w.herds = [{ ...h, n: 60, cond: 0.7, fed: 1 }];
+    w.day = 150; // summer
+    const hx = Math.floor(h.x),
+      hy = Math.floor(h.y);
+    for (let dy = -8; dy <= 8; dy++)
+      for (let dx = -8; dx <= 8; dx++) {
+        if (!w.inside(hx + dx, hy + dy)) continue;
+        const i = (hy + dy) * w.W + hx + dx;
+        w.L.lastBurn[i] = w.yearF - 0.5; // burned last season…
+        w.L.grass[i] = w.L.shrub[i] = w.L.aspen[i] = 0; // …and grazed and browsed to the ground
+      }
+    for (let d = 0; d < 20; d++) {
+      w.herds[0].x = h.x;
+      w.herds[0].y = h.y;
+      wildlifeDaily(w);
+      w.day++;
+    }
+    expect(w.herds[0].fed).toBeLessThan(0.1);
+    expect(w.herds[0].cond).toBeLessThan(0.7);
+  });
+
   it('beaver pairs that found a colony breed and grow it (audit D5)', () => {
     const w = smallWorld('firstseason', 'beaver-pair');
     const c0 = w.colonies[0];

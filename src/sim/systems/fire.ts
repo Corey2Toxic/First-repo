@@ -441,7 +441,8 @@ function spreadRate(ctx: StepCtx, b: number, n: number, d: number, vigor: number
 const passFuel: CellFuel = { fine: 0, grassShare: 0, ladder: 0, canopy: 0, heavy: 0, green: 0 };
 function passable(w: World, c: number): boolean {
   const L = w.L;
-  if (L.water[c] >= 2 || L.pond[c] > 0.35 || L.town[c] !== 0) return false;
+  // no hopping over a river or stream channel (fire entering one is slowed to 12-60 %)
+  if (L.water[c] !== 0 || L.flowAcc[c] > 300 || L.pond[c] > 0.35 || L.town[c] !== 0) return false;
   if (L.infra[c] & (INFRA.ROAD | INFRA.FUELBREAK) || L.fline[c] > 0.5 || L.retard[c] > 0.5 || L.wet[c] > 0.5) return false;
   if (L.fire[c] === FIRE.BURNING) return true;
   if (L.fire[c] !== FIRE.NONE) return false;

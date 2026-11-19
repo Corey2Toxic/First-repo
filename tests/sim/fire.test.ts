@@ -355,4 +355,32 @@ describe('fire behaviour', () => {
       expect(r).toBeLessThan(1.25);
     }
   });
+  it('a river channel slows a grass fire as much as it did before knight moves', () => {
+    // the 16-direction stencil first let knight moves hop over a one-cell river, skipping the slowdown
+    const reach = (river: boolean) => {
+      let sum = 0;
+      for (let k = 0; k < 10; k++) {
+        const w = flatWorld(70, 30, { grass: 0.85, litter: 0.4 });
+        w.rng.fire = new Rng('river-' + k);
+        w.weather.windSpeed = 2;
+        w.weather.windDir = 0;
+        if (river)
+          for (let y = 0; y < w.H; y++) {
+            const i = y * w.W + 30;
+            w.L.water[i] = 1;
+            w.L.flowAcc[i] = 2000;
+          }
+        const fe = startFire(w, 15 * w.W + 26, 'human')!;
+        burn(w, 2);
+        let far = 0;
+        for (let i = 0; i < w.N; i++) if (w.L.fid[i] === fe.id || w.L.lastBurn[i] > 0) far = Math.max(far, i % w.W);
+        sum += far;
+      }
+      return sum / 10;
+    };
+    const open = reach(false),
+      withRiver = reach(true);
+    expect(open).toBeGreaterThan(36);
+    expect(withRiver).toBeLessThan(open - 3);
+  });
 });

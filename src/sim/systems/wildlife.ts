@@ -48,7 +48,9 @@ const HA_PER_DEER_DAY = 1.0;
 
 function forageGrass(w: World, i: number): number {
   const L = w.L;
-  return L.grass[i] * (0.35 + 0.65 * greenness(w, i)) * (1 - 0.5 * L.graze[i]);
+  // regrowth on a recent burn is more nutritious for a few years (higher protein and digestibility)
+  const flush = w.yearF - L.lastBurn[i] < 4 ? 1.4 : 1;
+  return L.grass[i] * (0.35 + 0.65 * greenness(w, i)) * (1 - 0.5 * L.graze[i]) * flush;
 }
 /** Browse: shrub twigs (~450 kg/ha at full shrub cover; winter browse ranges run ~100–400) and suckers. */
 function forageWoody(w: World, i: number): number {
@@ -56,11 +58,8 @@ function forageWoody(w: World, i: number): number {
   const youngAspen = L.ageA[i] < 12 ? L.aspen[i] * 1.6 : L.aspen[i] * 0.25;
   return L.shrub[i] * 0.45 + youngAspen;
 }
-function foragePostFire(w: World, i: number): number {
-  return w.yearF - w.L.lastBurn[i] < 4 ? 0.25 : 0;
-}
 function forage(w: World, i: number): number {
-  return forageGrass(w, i) + forageWoody(w, i) + foragePostFire(w, i);
+  return forageGrass(w, i) + forageWoody(w, i);
 }
 
 function preferredElev(doy: number): number {
@@ -157,7 +156,7 @@ function updateHerd(w: World, h: Herd): void {
       if (!w.inside(x, y)) continue;
       const i = y * w.W + x;
       if (L.water[i] >= 2) continue;
-      avail += forageGrass(w, i) * grassAccess + forageWoody(w, i) * woodyAccess + foragePostFire(w, i);
+      avail += forageGrass(w, i) * grassAccess + forageWoody(w, i) * woodyAccess;
     }
   const demand = h.n * DEER_INTAKE * (1 + 0.5 * Math.min(1, snow / 200));
   const eaten = Math.min(demand, avail * DEER_CROP_SHARE);
