@@ -151,6 +151,8 @@ export class GameSession {
 
   dispose(): void {
     cancelAnimationFrame(this.raf);
+    // the renderer is shared with the title backdrop and the next session: release our lens buffer
+    if (this.renderer.overlayData === this.lensBuf) this.renderer.overlayData = null;
     for (const d of this.disposers) d();
     this.disposers = [];
     this.audio.stop();

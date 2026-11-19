@@ -95,6 +95,9 @@ export class MapRenderer {
   setWorld(w: World): void {
     const gl = this.gl;
     this.world = w;
+    // a lens overlay belongs to the world it was computed for: drop it on rebinding (v1.0 kept the
+    // previous session's buffer and copied a medium map's lens into a small backdrop → RangeError)
+    this.overlayData = null;
     this.W = w.W;
     this.H = w.H;
     for (const t of Object.values(this.tex)) gl.deleteTexture(t);
@@ -293,6 +296,11 @@ export class MapRenderer {
       this.versions.human = w.dirty.zone + w.dirty.infra * 7;
     }
     if (this.overlayData && this.overlayVersion !== this.versions.overlay) {
+      if (this.overlayData.length !== this.buf.overlay.length) {
+        // stale buffer from another world size: never copy across sizes
+        this.overlayData = null;
+        return;
+      }
       this.buf.overlay.set(this.overlayData);
       this.upload('overlay');
       this.versions.overlay = this.overlayVersion;
