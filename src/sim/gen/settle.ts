@@ -255,13 +255,16 @@ export function roadCost(w: World) {
   };
 }
 
-export function layRoad(w: World, path: number[] | null): number {
-  if (!path) return 0;
+export function layRoad(w: World, start: number, path: number[] | null): number {
+  if (!path || path.length === 0) return 0;
   let n = 0;
-  for (const c of path) {
+  const full = [start, ...path];
+  for (const c of full) {
     if (!(w.L.infra[c] & INFRA.ROAD)) n++;
     w.L.infra[c] |= INFRA.ROAD;
   }
+  w.roads.push(full);
+  w.dirty.infra++;
   return n;
 }
 
@@ -286,7 +289,7 @@ export function buildInitialRoads(w: World, info: TerrainInfo, rng: Rng): void {
   let prev = outlet;
   for (const t of ordered) {
     const goal = t.y * W + t.x;
-    layRoad(w, astar(W, H, prev, goal, cost, 1));
+    layRoad(w, prev, astar(W, H, prev, goal, cost, 1));
     prev = goal;
   }
   // Forest roads up side valleys from each town.
@@ -311,7 +314,7 @@ export function buildInitialRoads(w: World, info: TerrainInfo, rng: Rng): void {
           best = i;
         }
       }
-      if (best >= 0) layRoad(w, astar(W, H, t.y * W + t.x, best, cost, 1));
+      if (best >= 0) layRoad(w, t.y * W + t.x, astar(W, H, t.y * W + t.x, best, cost, 1));
     }
   }
 }
@@ -362,7 +365,7 @@ export function placeInfrastructure(w: World, rng: Rng, names: NameBank): void {
   if (tower >= 0) {
     L.infra[tower] |= INFRA.TOWER;
     w.towers.push(tower);
-    layRoad(w, astar(W, H, main.station, tower, cost, 1));
+    layRoad(w, main.station, astar(W, H, main.station, tower, cost, 1));
   }
 
   // Campground at the most accessible lake shore (not the reservoir).
@@ -414,7 +417,7 @@ export function placeInfrastructure(w: World, rng: Rng, names: NameBank): void {
         nearestTown = t;
       }
     }
-    layRoad(w, astar(W, H, nearestTown.station, camp, cost, 1));
+    layRoad(w, nearestTown.station, astar(W, H, nearestTown.station, camp, cost, 1));
   }
   void names;
 }

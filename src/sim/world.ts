@@ -78,6 +78,7 @@ export const LAYER_SPECS = {
   fint: 'f32', // fire intensity (0..~2)
   ftime: 'f32', // remaining burn hours
   fid: 'i32', // fire event id (-1 none)
+  fpeak: 'f32', // peak intensity during the current burn (sets severity)
   crown: 'u8', // 1 if crowning
   fline: 'f32', // fireline/containment strength 0..1
   retard: 'f32', // retardant strength 0..1
@@ -94,6 +95,9 @@ export const LAYER_SPECS = {
   town: 'i8', // structure owner town id + 1 (0 = none)
   sediment: 'f32', // sediment flux (transient)
   smokeHours: 'f32', // cumulative smoke exposure this year (for map)
+  seedA: 'f32', // monthly seed-rain maps (dispersal kernels of mature trees)
+  seedP: 'f32',
+  seedF: 'f32',
 } as const satisfies Record<string, LayerType>;
 
 export type LayerName = keyof typeof LAYER_SPECS;
@@ -107,6 +111,20 @@ type LayerArrayFor<T extends LayerType> = T extends 'f32'
         ? Int8Array
         : Uint16Array;
 export type Layers = { [K in LayerName]: LayerArrayFor<(typeof LAYER_SPECS)[K]> };
+
+/**
+ * Objects built with many computed-key assignments fall into V8's slow
+ * "dictionary mode", turning every layer access in hot loops into a hash
+ * lookup (measured: ~10x slower). Installing the object as a function's
+ * prototype makes V8 convert it back to fast, shape-based properties.
+ */
+export function toFastProperties<T extends object>(o: T): T {
+  function Sub() {}
+  Sub.prototype = o;
+  // touch the prototype so the engine materialises the fast map
+  void (Sub as unknown as { prototype: T }).prototype;
+  return o;
+}
 
 export function allocLayer(type: LayerType, n: number) {
   switch (type) {
@@ -241,6 +259,11 @@ export class World {
   colonies: Colony[] = [];
   towers: number[] = []; // cell indices
   camps: number[] = [];
+  /** Burning cells in ignition order (kept sorted each sub-step for determinism) */
+  burning: number[] = [];
+  smokePresent = false;
+  /** Road polylines (cell paths) for rendering and pathing */
+  roads: number[][] = [];
   reservoirCells: number[] = [];
   reservoirLevel = 1; // 0..1 fill fraction
   reservoirSilt = 0; // 0..1 capacity lost to sediment
@@ -313,7 +336,7 @@ export class World {
     for (const [name, type] of Object.entries(LAYER_SPECS)) {
       L[name] = allocLayer(type as LayerType, this.N);
     }
-    this.L = L as Layers;
+    this.L = toFastProperties(L) as Layers;
     this.L.flowTo.fill(-1);
     this.L.fid.fill(-1);
     this.L.lastBurn.fill(-999);
