@@ -156,6 +156,8 @@ export interface Herd {
   n: number; // animals
   cond: number; // body condition 0..1
   fed: number; // today's intake ratio
+  /** lowest condition since autumn: late-winter condition sets next spring's fawn crop */
+  low?: number;
 }
 
 export interface Pack {

@@ -6,6 +6,7 @@
 import type { Camera } from './camera.ts';
 import type { World } from '../sim/world.ts';
 import { INFRA } from '../sim/types.ts';
+import { TERRITORY_RADIUS } from '../sim/systems/wildlife.ts';
 import type { Crew, Project } from '../sim/types.ts';
 
 export type Selection =
@@ -185,7 +186,7 @@ export class OverlayRenderer {
           ctx.strokeStyle = 'rgba(170,150,255,0.6)';
           ctx.setLineDash([5, 5]);
           ctx.beginPath();
-          ctx.arc(tx, ty, 30 * s, 0, Math.PI * 2);
+          ctx.arc(tx, ty, TERRITORY_RADIUS * s, 0, Math.PI * 2);
           ctx.stroke();
           ctx.setLineDash([]);
           this.ring(x, y, 12, '#c8b8ff');

@@ -491,10 +491,10 @@ function WildView({ s }: { s: GameSession }) {
           <span class="k">Body condition</span>
           <span class="v">{pct(h.cond)}</span>
           <span class="k">Foraging</span>
-          <span class="v">{h.fed > 1 ? 'plenty' : h.fed > 0.6 ? 'adequate' : 'scarce'}</span>
+          <span class="v">{h.fed > 0.95 ? 'plenty' : h.fed > 0.6 ? 'adequate' : 'scarce'}</span>
         </div>
         <p class="faint" style={{ fontSize: '12px' }}>
-          Herds summer high and winter low, follow fresh growth after fire, and avoid places where wolves have been.
+          Herds summer high and winter low, follow fresh growth after fire, and avoid places where wolves have been. Each deer eats what its herd finds where it stands, so crowded winter range means thin deer by spring.
         </p>
       </div>
     );
@@ -509,7 +509,7 @@ function WildView({ s }: { s: GameSession }) {
           <span class="k">Kills</span>
           <span class="v">{p.kills} deer</span>
           <span class="k">Hunger</span>
-          <span class="v">{p.hunger > 1.2 ? 'starving' : p.hunger > 0.6 ? 'hungry' : 'fed'}</span>
+          <span class="v">{p.hunger > 0.8 ? 'starving' : p.hunger > 0.3 ? 'hungry' : 'fed'}</span>
         </div>
         <p class="faint" style={{ fontSize: '12px' }}>
           The dashed circle is the pack’s territory. Deer avoid it, so browse there falls and young aspen and willow can grow.

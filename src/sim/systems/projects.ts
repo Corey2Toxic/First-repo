@@ -152,19 +152,29 @@ export function applyThinning(w: World, i: number): void {
   w.dirty.veg++;
 }
 
+/**
+ * Seedlings join the cell's cohort of that species as a young cohort: the mean age is weighted by
+ * cover, exactly as natural recruits are (vegetation.ts). v1.0 reset the mean age of every tree of
+ * that species in the cell to at most 1 year, so planting under a 170-year stand made it 1 year old
+ * and planting the eligible open old stands halved the valley's old growth (D4).
+ */
+export function plantedAge(cover: number, age: number, add: number, seedlingAge = 1): number {
+  return cover + add > 0 ? (cover * age + add * seedlingAge) / (cover + add) : seedlingAge;
+}
+
 export function applyPlanting(w: World, i: number, species: number): void {
   const L = w.L;
   const add = 0.09;
   if (species === SP.ASPEN) {
+    L.ageA[i] = plantedAge(L.aspen[i], L.ageA[i], add);
     L.aspen[i] += add;
     L.aroot[i] = clamp01(L.aroot[i] + 0.3);
-    L.ageA[i] = Math.min(L.ageA[i], 1);
   } else if (species === SP.FIR) {
+    L.ageF[i] = plantedAge(L.fir[i], L.ageF[i], add);
     L.fir[i] += add;
-    L.ageF[i] = Math.min(L.ageF[i], 1);
   } else {
+    L.ageP[i] = plantedAge(L.pine[i], L.ageP[i], add);
     L.pine[i] += add;
-    L.ageP[i] = Math.min(L.ageP[i], 1);
   }
   L.lastTreat[i] = w.yearF;
   w.dirty.veg++;

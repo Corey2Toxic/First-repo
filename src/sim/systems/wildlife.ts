@@ -29,12 +29,38 @@ export interface WildlifeHooks {
   onDamBuilt?: (c: Colony) => void;
 }
 
-function forage(w: World, i: number): number {
+// ------------------------------------------------------------ forage
+/*
+ * Forage is measured in "forage units" of accessible dry matter (1 unit ≈ 1 t/ha). A herd eats from
+ * the patch it stands on, so how well each deer feeds depends on how many deer share that patch and
+ * how much they have already eaten there: density dependence is emergent. v1.0 fed every herd the
+ * mean forage of its patch whatever its size and held the population near a carrying capacity
+ * computed from total forage (audit: herds of 5 and 300 reached the same condition; without the
+ * global K deer overshot 1.6–2.5×). The binding constraint is, as for real mule deer, the winter
+ * range: grass under snow, shrubs and aspen suckers browsed down as the winter wears on.
+ */
+/** Daily intake per deer, forage units (≈ 2.5 kg dry matter). */
+export const DEER_INTAKE = 0.0025;
+/** Largest share of a patch's accessible forage a herd can crop in a day (selective foraging). */
+export const DEER_CROP_SHARE = 0.03;
+/** Ground a deer covers foraging in a day, ha: a herd ranges over (2R+1)² cells with (2R+1)² ≈ n × this. */
+const HA_PER_DEER_DAY = 1.0;
+
+function forageGrass(w: World, i: number): number {
   const L = w.L;
-  const g = greenness(w, i);
+  return L.grass[i] * (0.35 + 0.65 * greenness(w, i)) * (1 - 0.5 * L.graze[i]);
+}
+/** Browse: shrub twigs (~450 kg/ha at full shrub cover; winter browse ranges run ~100–400) and suckers. */
+function forageWoody(w: World, i: number): number {
+  const L = w.L;
   const youngAspen = L.ageA[i] < 12 ? L.aspen[i] * 1.6 : L.aspen[i] * 0.25;
-  const postFire = w.yearF - L.lastBurn[i] < 4 ? 0.25 : 0;
-  return L.grass[i] * (0.35 + 0.65 * g) * (1 - 0.5 * L.graze[i]) + L.shrub[i] * 0.8 + youngAspen + postFire;
+  return L.shrub[i] * 0.45 + youngAspen;
+}
+function foragePostFire(w: World, i: number): number {
+  return w.yearF - w.L.lastBurn[i] < 4 ? 0.25 : 0;
+}
+function forage(w: World, i: number): number {
+  return forageGrass(w, i) + forageWoody(w, i) + foragePostFire(w, i);
 }
 
 function preferredElev(doy: number): number {
@@ -51,6 +77,11 @@ function humanPressure(w: World, i: number): number {
   return p;
 }
 
+/** Unbiased stochastic rounding: E[result] = x. */
+export function stochasticRound(x: number, u: number): number {
+  return Math.floor(x + u);
+}
+
 // ------------------------------------------------------------ herds
 function updateHerd(w: World, h: Herd): void {
   const L = w.L;
@@ -58,6 +89,11 @@ function updateHerd(w: World, h: Herd): void {
   h.px = h.x;
   h.py = h.y;
   const target = preferredElev(w.doy);
+  // in winter herds come down onto the low, snow-free winter range and crowd it (as migratory mule
+  // deer do), so that is where forage runs short; in summer they spread out over the high country
+  const winterRange = w.month >= 9 || w.month === 0;
+  const elevW = winterRange ? 1 / 250 : 1 / 700;
+  const snowW = winterRange ? 1 / 60 : 1 / 120;
   const hx = Math.floor(h.x),
     hy = Math.floor(h.y);
   let best = hy * w.W + hx,
@@ -67,11 +103,11 @@ function updateHerd(w: World, h: Herd): void {
     if (L.fire[i] === FIRE.BURNING) return -20;
     return (
       forage(w, i) * 1.3 -
-      Math.min(2, L.snow[i] / 120) -
+      Math.min(2, L.snow[i] * snowW) -
       L.fear[i] * 1.4 -
       humanPressure(w, i) -
       L.slope[i] * 0.6 -
-      Math.abs(L.elev[i] - target) / 700 +
+      Math.abs(L.elev[i] - target) * elevW +
       r.next() * 0.15
     );
   };
@@ -100,63 +136,85 @@ function updateHerd(w: World, h: Herd): void {
     h.x += (dx / dist) * step;
     h.y += (dy / dist) * step;
   }
-  // eat: draw down forage, leave browse pressure
+  // eat: per-capita intake from the ground the herd covers in a day (5×5 cells, 25 ha); deep snow
+  // buries grass and costs energy
   const cx = Math.floor(h.x),
     cy = Math.floor(h.y);
-  let intake = 0;
-  const per = h.n * 0.00009;
-  for (let oy = -1; oy <= 1; oy++)
-    for (let ox = -1; ox <= 1; ox++) {
+  const snow = L.snow[cy * w.W + cx];
+  // bigger herds cover more ground, so at low landscape density every deer eats its fill whatever the
+  // herd size, and shortage comes from herds depleting and sharing the same range
+  const FORAGE_R = Math.max(1, Math.min(5, Math.round((Math.sqrt(h.n * HA_PER_DEER_DAY) - 1) / 2)));
+  // winter: grass under snow is hard to reach, and cured grass is poor food for a browser like a mule
+  // deer (low digestibility), so the winter diet is mostly browse
+  const winter = w.season === 3 || (w.season === 2 && snow > 30);
+  const grassAccess = (1 - 0.85 * Math.min(1, snow / 120)) * (winter ? 0.5 : 1);
+  const woodyAccess = 1 - 0.3 * Math.min(1, snow / 250);
+  let avail = 0;
+  for (let oy = -FORAGE_R; oy <= FORAGE_R; oy++)
+    for (let ox = -FORAGE_R; ox <= FORAGE_R; ox++) {
       const x = cx + ox,
         y = cy + oy;
       if (!w.inside(x, y)) continue;
       const i = y * w.W + x;
-      const f = forage(w, i);
-      intake += f;
-      L.grass[i] = Math.max(0, L.grass[i] - per * 0.6);
-      L.shrub[i] = Math.max(0, L.shrub[i] - per * 0.35);
-      L.browse[i] = clamp01(L.browse[i] + h.n * 0.0011);
+      if (L.water[i] >= 2) continue;
+      avail += forageGrass(w, i) * grassAccess + forageWoody(w, i) * woodyAccess + foragePostFire(w, i);
     }
-  // deep snow buries grass and costs energy; deer live off autumn fat through winter
-  const snow = L.snow[cy * w.W + cx];
-  const need = 0.5 + Math.min(0.45, snow / 250);
-  const avail = intake * (1 - 0.55 * Math.min(1, snow / 120));
-  const ratio = avail / 9 / need;
+  const demand = h.n * DEER_INTAKE * (1 + 0.5 * Math.min(1, snow / 200));
+  const eaten = Math.min(demand, avail * DEER_CROP_SHARE);
+  const ratio = demand > 0 ? eaten / demand : 1;
+  // what was eaten comes off the patch; woody browse leaves the browse field that kills suckers
+  const frac = avail > 0 ? eaten / avail : 0;
+  if (frac > 0)
+    for (let oy = -FORAGE_R; oy <= FORAGE_R; oy++)
+      for (let ox = -FORAGE_R; ox <= FORAGE_R; ox++) {
+        const x = cx + ox,
+          y = cy + oy;
+        if (!w.inside(x, y)) continue;
+        const i = y * w.W + x;
+        if (L.water[i] >= 2) continue;
+        // deer crop the accessible current growth, about half the standing grass that would cure into
+        // fuel and litter, so a unit of forage eaten removes less than a unit's worth of cover
+        L.grass[i] = Math.max(0, L.grass[i] * (1 - frac * grassAccess * 0.5));
+        // browsing takes the current year's twigs; what it does to shrub growth is the browse field
+        L.shrub[i] = Math.max(0, L.shrub[i] * (1 - frac * woodyAccess * 0.25));
+        // the browse field is feeding pressure: it kills suckers and shoots and, when deer crowd a
+        // range, holds back grass and shrub regrowth (range damage), so irruptions undercut themselves
+        L.browse[i] = clamp01(L.browse[i] + frac * (0.9 * woodyAccess + 0.3 * grassAccess));
+      }
   h.fed = ratio;
-  if (w.season === 3 || (w.season === 2 && snow > 30)) {
-    // winter: living off autumn fat; deep snow costs more, browse above the snow helps
-    h.cond = clamp01(h.cond - (0.0022 + 0.0018 * Math.min(1, snow / 150) - 0.0012 * Math.min(1, ratio)));
+  if (winter) {
+    // winter: living off autumn fat; deep snow costs more; going hungry costs most
+    h.cond = clamp01(h.cond - (0.0014 + 0.0016 * Math.min(1, snow / 150) + 0.004 * (1 - ratio)));
+    h.low = Math.min(h.low ?? 1, h.cond);
   } else {
-    // growing season: condition tracks forage per animal (density dependence)
-    const target = clamp01(0.3 + 0.62 * Math.min(1.15, ratio));
+    // growing season: condition tracks forage per animal
+    const target = 0.3 + 0.62 * ratio;
     h.cond += (target - h.cond) * 0.03;
   }
-}
-
-/** Deer the valley can feed: forage summed over the land (sampled). */
-export function deerCapacity(w: World): number {
-  let f = 0;
-  for (let i = 0; i < w.N; i += 3) if (!w.L.water[i] && !w.L.town[i]) f += forage(w, i);
-  return Math.max(50, f * 3 * 0.19);
 }
 
 function herdsMonthly(w: World): void {
   const r = w.rng.wildlife;
   const month = w.month;
-  // density dependence: crowded herds raise fewer fawns and starve more
-  let total = 0;
-  for (const h of w.herds) total += h.n;
-  const K = w.month === 2 || w.month === 10 ? deerCapacity(w) : (w.memory.deerK ?? deerCapacity(w));
-  w.memory.deerK = K;
-  const crowd = total / K;
   for (const h of w.herds) {
-    if (month === 2) h.n += Math.round(h.n * 0.5 * smoothstep(0.2, 0.7, h.cond) * Math.max(0, 1 - crowd * 0.85)); // fawning
-    let deaths = h.n * 0.006 + h.n * 0.05 * Math.max(0, crowd - 0.95);
+    // fawns: a doe that came through winter in good condition raises one or two; a thin one may
+    // raise none (late-winter condition, not the spring flush, sets the fawn crop)
+    // (surviving fawns per head of the herd: ~0.3 after an average winter, up to 0.4 — ~0.8 per doe —
+    // after a mild one; typical mule deer fawn:doe ratios run 0.5–0.7)
+    if (month === 2) {
+      h.n += stochasticRound(h.n * 0.4 * smoothstep(0.35, 0.7, Math.min(h.cond, h.low ?? h.cond)), r.next());
+      h.low = undefined;
+    }
+    let deaths = h.n * 0.006;
     if (h.cond < 0.2) deaths += h.n * 0.08 * (1 - h.cond / 0.2);
-    h.n = Math.max(0, h.n - Math.round(deaths + r.next() * 0.5));
+    // late winter and thaw: thin animals (fawns first) die as the winter range runs out
+    if ((month >= 9 || month === 0) && h.cond < 0.5) deaths += h.n * 0.1 * (1 - h.cond / 0.5);
+    // (v1.0 rounded deaths as round(x + 0.5u), which doubles mortality whenever x < 0.5: small herds,
+    // exactly those trying to recover, died at twice the intended rate)
+    h.n = Math.max(0, h.n - stochasticRound(deaths, r.next()));
     if (month === 8) {
       const rate = w.policies.hunting === 'heavy' ? 0.2 : w.policies.hunting === 'moderate' ? 0.09 : 0;
-      const taken = Math.round(h.n * rate);
+      const taken = Math.min(h.n, stochasticRound(h.n * rate, r.next()));
       if (taken > 0) {
         h.n -= taken;
         w.counters.yearHunted += taken;
@@ -187,25 +245,65 @@ function herdsMonthly(w: World): void {
 }
 
 // ------------------------------------------------------------ wolves
+/*
+ * Wolves (v1.1). v1.0 packs walked 350–600 m a day, held ~20 km² territories founded 4.8 km apart,
+ * raised 1–4 pups a year whatever the prey, and fed by a global prey/K ratio; populations boomed to
+ * 15 wolves per 100 km², crashed their prey and went extinct (18 of 20 audit runs), surviving only
+ * through a 6 %/yr recolonisation roll. Now:
+ *  - territories are ~130 km² (radius 6.5 km) and new packs need a vacant one, so wolf density is
+ *    bounded by space, as in real populations (Mech & Boitani 2003: 1–5 wolves/100 km² typical);
+ *  - a pack travels 15–25 km a day across its territory and hunts when hungry; each wolf needs
+ *    about one deer every 18 days (~20 per year), so kill rates are set by satiation, not chance;
+ *  - pups survive in proportion to the deer in the territory per wolf; hungry packs raise none;
+ *  - most dispersers leave the valley; a disperser pair settles only in a vacant territory;
+ *  - dispersing pairs from outside settle in vacant territory now and then (~25 %/yr while there is
+ *    room and prey),
+ *    not only after extinction.
+ */
+export const TERRITORY_RADIUS = 65; // cells (6.5 km), ~130 km²
+const TERRITORY_SPACING = 100; // minimum distance between territory centres, cells
+const WOLF_NEED = 1 / 18; // deer per wolf per day
+
+/** Deer living within a territory (plus a margin the pack also ranges over). */
+function preyInTerritory(w: World, tx: number, ty: number): number {
+  let n = 0;
+  const R = TERRITORY_RADIUS * 1.3;
+  for (const h of w.herds) if (Math.hypot(h.x - tx, h.y - ty) < R) n += h.n;
+  return n;
+}
+
+/** Is (x, y) a place a new pack could settle: on the map, dry, away from towns and other packs? */
+export function vacantTerritory(w: World, x: number, y: number, others: Pack[] = w.packs): boolean {
+  if (!w.inside(Math.floor(x), Math.floor(y))) return false;
+  if (w.L.water[Math.floor(y) * w.W + Math.floor(x)] >= 2) return false;
+  if (others.some((o) => Math.hypot(o.tx - x, o.ty - y) < TERRITORY_SPACING)) return false;
+  if (w.towns.some((t) => Math.hypot(t.x - x, t.y - y) < 18)) return false;
+  return true;
+}
+
 function updatePack(w: World, p: Pack, hooks: WildlifeHooks): void {
   const L = w.L;
   const r = w.rng.wildlife;
   p.px = p.x;
   p.py = p.y;
-  // bigger packs need more food
-  p.hunger = Math.min(2, p.hunger + 0.025 + 0.018 * p.n);
-  let tx = p.tx + r.range(-14, 14),
-    ty = p.ty + r.range(-14, 14);
-  let speed = 3.5;
-  if (p.hunger > 0.4) {
+  // hunger: deer-equivalents of unmet need per wolf
+  p.hunger = Math.min(2, p.hunger + WOLF_NEED);
+  let tx = p.tx + r.range(-0.7, 0.7) * TERRITORY_RADIUS,
+    ty = p.ty + r.range(-0.7, 0.7) * TERRITORY_RADIUS;
+  let speed = 15;
+  if (p.hunger > 0.15) {
     let best: Herd | null = null,
       bs = -Infinity;
     for (const h of w.herds) {
+      // wolves keep clear of towns, so herds sheltering next to one are out of reach
+      if (w.towns.some((t) => Math.hypot(t.x - h.x, t.y - h.y) < 11)) continue;
       const dT = Math.hypot(h.x - p.tx, h.y - p.ty);
       const dP = Math.hypot(h.x - p.x, h.y - p.y);
-      if (dT > 45 && dP > 14) continue;
+      // packs follow migrating deer to the edges of their range; hungry packs range further
+      const reach = TERRITORY_RADIUS * (p.hunger > 0.6 ? 2 : 1.3);
+      if (dT > reach && dP > 40) continue;
       const vuln = (1.25 - h.cond) * (1 + Math.min(1, L.snow[Math.floor(h.y) * w.W + Math.floor(h.x)] / 120));
-      const s = vuln * Math.sqrt(h.n) - dP * 0.08;
+      const s = vuln * Math.sqrt(h.n) - dP * 0.02;
       if (s > bs) {
         bs = s;
         best = h;
@@ -215,8 +313,8 @@ function updatePack(w: World, p: Pack, hooks: WildlifeHooks): void {
       p.targetHerd = best.id;
       tx = best.x;
       ty = best.y;
-      speed = 6;
-    }
+      speed = 25;
+    } else p.targetHerd = -1;
   } else p.targetHerd = -1;
   // avoid towns
   for (const t of w.towns) {
@@ -230,31 +328,54 @@ function updatePack(w: World, p: Pack, hooks: WildlifeHooks): void {
     dy = ty - p.y;
   const dist = Math.hypot(dx, dy);
   if (dist > 0.01) {
+    // head for the target, detouring around lakes (v1.0 packs simply stopped when a lake lay on the
+    // straight line, and could stay stuck behind it for weeks)
     const s = Math.min(dist, speed);
-    const nx = p.x + (dx / dist) * s,
-      ny = p.y + (dy / dist) * s;
-    if (w.inside(Math.floor(nx), Math.floor(ny)) && L.water[Math.floor(ny) * w.W + Math.floor(nx)] < 2) {
-      p.x = nx;
-      p.y = ny;
+    const base = Math.atan2(dy, dx);
+    for (const turn of [0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]) {
+      for (const f of [1, 0.5]) {
+        const nx = p.x + Math.cos(base + turn) * s * f,
+          ny = p.y + Math.sin(base + turn) * s * f;
+        if (!w.inside(Math.floor(nx), Math.floor(ny)) || L.water[Math.floor(ny) * w.W + Math.floor(nx)] >= 2) continue;
+        // the straight line must not cross a lake either
+        let wet = false;
+        for (let k = 1; k < 8 && !wet; k++) {
+          const sx = Math.floor(p.x + ((nx - p.x) * k) / 8),
+            sy = Math.floor(p.y + ((ny - p.y) * k) / 8);
+          if (w.inside(sx, sy) && L.water[sy * w.W + sx] >= 2) wet = true;
+        }
+        if (wet) continue;
+        p.x = nx;
+        p.y = ny;
+        break;
+      }
+      if (p.x !== p.px || p.y !== p.py) break;
     }
   }
   // the hunt: once the pack has closed on its target herd (after both have moved today)
   if (p.targetHerd >= 0) {
     const best = w.herds.find((h) => h.id === p.targetHerd);
-    if (best && Math.hypot(best.x - p.x, best.y - p.y) < 2.5) {
+    // type II functional response: where deer are scarce, finding and cornering them takes longer
+    const dens = preyInTerritory(w, p.tx, p.ty) / (Math.PI * (TERRITORY_RADIUS * 1.3) ** 2 * 0.01); // deer/km²
+    const engage = dens / (dens + 1.5);
+    if (best && Math.hypot(best.x - p.x, best.y - p.y) < 3 && r.next() < engage) {
       const snow = L.snow[Math.floor(best.y) * w.W + Math.floor(best.x)];
-      // type II functional response: scarce, wary prey is hard to find and corner
-      const density = w.memory.deerK ? deerTotal(w) / w.memory.deerK : 0.5;
-      const scarcity = smoothstep(0.02, 0.32, density);
-      const pSuccess = 0.33 * Math.sqrt(p.n / 5) * (0.6 + 0.8 * (1 - best.cond)) * (snow > 60 ? 1.4 : 1) * (0.25 + 0.75 * scarcity);
+      // success rises with pack size (to a point), prey weakness and deep snow
+      const pSuccess = Math.min(0.95, 0.75 * Math.min(1.4, Math.sqrt(p.n / 4)) * (0.6 + 0.8 * (1 - best.cond)) * (snow > 60 ? 1.4 : 1));
       if (r.next() < pSuccess) {
         const k = p.n >= 8 && best.n > 3 ? 2 : 1;
         best.n = Math.max(0, best.n - k);
-        p.hunger = Math.max(0, p.hunger - 0.9 * k);
+        p.hunger = Math.max(0, p.hunger - k / Math.max(2, p.n)); // the kill is shared by the pack
         p.kills += k;
-        // territories drift toward where the hunting is good
-        p.tx += (best.x - p.tx) * 0.04;
-        p.ty += (best.y - p.ty) * 0.04;
+        // territories drift toward where the hunting is good (but keep their distance from neighbours)
+        // (territories are stable for years: a slow drift, and the centre stays well inside the valley)
+        const m = TERRITORY_RADIUS * 0.6;
+        const nx = Math.max(m, Math.min(w.W - m, p.tx + (best.x - p.tx) * 0.01)),
+          ny = Math.max(m, Math.min(w.H - m, p.ty + (best.y - p.ty) * 0.01));
+        if (!w.packs.some((o) => o !== p && Math.hypot(o.tx - nx, o.ty - ny) < TERRITORY_SPACING * 0.8)) {
+          p.tx = nx;
+          p.ty = ny;
+        }
       }
     }
   }
@@ -273,7 +394,7 @@ function updatePack(w: World, p: Pack, hooks: WildlifeHooks): void {
       L.fear[i] = Math.max(L.fear[i], 0.85 * (1 - d / (R + 1)) * Math.min(1, p.n / 4));
     }
   // conflict with livestock on rangeland in the grazing season
-  if (p.hunger > 0.7 && w.month >= 1 && w.month <= 7 && w.policies.grazing !== 'none') {
+  if (p.hunger > 0.4 && w.month >= 1 && w.month <= 7 && w.policies.grazing !== 'none') {
     let nearRange = false;
     for (let oy = -3; oy <= 3 && !nearRange; oy++)
       for (let ox = -3; ox <= 3; ox++) {
@@ -288,7 +409,7 @@ function updatePack(w: World, p: Pack, hooks: WildlifeHooks): void {
     if (nearRange && r.next() < 0.012 * herdSize) {
       w.counters.yearDepredations++;
       w.memory.lastDepredationDay = w.day;
-      p.hunger = Math.max(0, p.hunger - 0.8);
+      p.hunger = Math.max(0, p.hunger - 0.5);
       if (hooks.onDepredation) hooks.onDepredation(p);
       if (w.policies.wolfPolicy !== 'protected' && (w.policies.wolfPolicy === 'bounty' || r.next() < 0.3)) {
         const k = w.policies.wolfPolicy === 'bounty' ? 2 : 1;
@@ -305,56 +426,73 @@ function packsMonthly(w: World, hooks: WildlifeHooks): void {
   const r = w.rng.wildlife;
   const names = new NameBank(w.rng.wildlife.fork('packnames' + w.day));
   const born: Pack[] = [];
+  // deer per wolf, valley-wide: wolf density tracks prey biomass (Fuller 1989; Fuller, Mech &
+  // Cochrane 2003: roughly one wolf per 200–300 deer where wolves are stable)
+  let deerAll = 0,
+    wolvesAll = 0;
+  for (const h of w.herds) deerAll += h.n;
+  for (const p of w.packs) wolvesAll += p.n;
+  const valleyPPW = deerAll / Math.max(1, wolvesAll);
   for (const p of w.packs) {
-    const preyRatio = w.memory.deerK ? deerTotal(w) / w.memory.deerK : 0.5;
-    const preyRich = preyRatio > 0.18;
-    if (w.month === 2 && p.hunger < 0.9 && p.n < 12 && preyRich) p.n += r.intRange(1, 4);
-    if (r.next() < 0.04 * (p.n / 5)) p.n -= 1; // natural mortality
-    if (p.hunger > 1.8 && r.next() < 0.35) p.n -= 1; // starvation
+    const preyPerWolf = Math.min(valleyPPW, preyInTerritory(w, p.tx, p.ty) / Math.max(1, p.n));
+    // spring litter: pups survive in proportion to the prey per wolf; hungry packs raise none
+    if (w.month === 2 && p.n >= 2 && p.n < 14) {
+      const q = smoothstep(120, 320, preyPerWolf) * (1 - smoothstep(0.4, 1.0, p.hunger));
+      p.n += Math.round(r.intRange(3, 6) * q);
+    }
+    // when prey runs short, young wolves leave before the pack starves
+    if (preyPerWolf < 100 && p.n > 2) p.n -= Math.round((p.n - 2) * 0.15 * (1 - preyPerWolf / 100));
+    // natural mortality ~12 %/yr per wolf (disease, injury, conflict between packs)
+    let deaths = 0;
+    for (let k = 0; k < p.n; k++) if (r.next() < 0.0106) deaths++;
+    p.n -= deaths;
+    // starvation after weeks of unmet need
+    if (p.hunger > 1) p.n -= Math.max(1, Math.round(p.n * 0.2 * Math.min(1, p.hunger - 0.9)));
     if (w.policies.wolfPolicy === 'bounty' && r.next() < 0.45) {
       p.n -= 1;
       w.counters.yearWolvesKilled++;
       if (hooks.onWolvesKilled) hooks.onWolvesKilled(p, 1);
     }
-    // dispersal: young wolves found new packs where there is room
-    if (p.n >= 9 && w.month >= 6 && w.month <= 9 && preyRatio > 0.3) {
-      for (let k = 0; k < 40; k++) {
-        const ang = r.range(0, Math.PI * 2),
-          d = r.range(28, 60);
-        const x = p.tx + Math.cos(ang) * d,
-          y = p.ty + Math.sin(ang) * d;
-        if (!w.inside(Math.floor(x), Math.floor(y))) continue;
-        if (w.L.water[Math.floor(y) * w.W + Math.floor(x)] >= 2) continue;
-        if ([...w.packs, ...born].some((o) => Math.hypot(o.tx - x, o.ty - y) < 48)) continue;
-        if (w.towns.some((t) => Math.hypot(t.x - x, t.y - y) < 16)) continue;
-        const np: Pack = { id: w.nextId(), name: names.packName(), x: p.x, y: p.y, px: p.x, py: p.y, n: 3, tx: x, ty: y, hunger: 0.5, targetHerd: -1, kills: 0, founded: w.day };
-        p.n -= 3;
-        born.push(np);
-        if (hooks.onPackFormed) hooks.onPackFormed(np, p);
-        break;
+    // autumn dispersal: young wolves leave large packs; a pair founds a pack only where a territory
+    // is vacant, otherwise they leave the valley
+    if (w.month >= 6 && w.month <= 9 && p.n >= 8) {
+      const leaving = Math.min(4, p.n - 5);
+      p.n -= leaving;
+      if (leaving >= 2 && r.next() < 0.5 && deerAll / (wolvesAll + 2) > 250) {
+        for (let k = 0; k < 30; k++) {
+          const ang = r.range(0, Math.PI * 2),
+            d = r.range(TERRITORY_SPACING, TERRITORY_SPACING * 1.8);
+          const x = p.tx + Math.cos(ang) * d,
+            y = p.ty + Math.sin(ang) * d;
+          if (!vacantTerritory(w, x, y, [...w.packs, ...born])) continue;
+          const np: Pack = { id: w.nextId(), name: names.packName(), x: p.x, y: p.y, px: p.x, py: p.y, n: 2, tx: x, ty: y, hunger: 0.3, targetHerd: -1, kills: 0, founded: w.day };
+          born.push(np);
+          if (hooks.onPackFormed) hooks.onPackFormed(np, p);
+          break;
+        }
       }
     }
   }
   w.packs.push(...born);
   for (const p of w.packs) if (p.n < 2 && hooks.onPackLost) hooks.onPackLost(p);
   w.packs = w.packs.filter((p) => p.n >= 2);
-  // wolves recolonise empty valleys on their own, now and then (not under a bounty)
-  if (w.packs.length === 0 && w.month === 9 && w.policies.wolfPolicy !== 'bounty' && r.next() < 0.06) {
-    const edge = r.int(4);
-    const x = edge === 0 ? 3 : edge === 1 ? w.W - 4 : r.range(10, w.W - 10);
-    const y = edge === 2 ? 3 : edge === 3 ? w.H - 4 : r.range(10, w.H - 10);
-    if (w.L.water[Math.floor(y) * w.W + Math.floor(x)] < 2) {
-      const np: Pack = { id: w.nextId(), name: names.packName(), x, y, px: x, py: y, n: 2, tx: w.W / 2 + (x - w.W / 2) * 0.5, ty: w.H / 2 + (y - w.H / 2) * 0.5, hunger: 0.6, targetHerd: -1, kills: 0, founded: w.day };
-      w.packs.push(np);
-      if (hooks.onPackFormed) hooks.onPackFormed(np, np);
+  // dispersing pairs from beyond the valley settle in vacant territory now and then (not under a bounty)
+  if (w.month === 9 && w.policies.wolfPolicy !== 'bounty' && deerAll / (wolvesAll + 2) > 250) {
+    for (let k = 0; k < 20; k++) {
+      const x = r.range(TERRITORY_RADIUS * 0.4, w.W - TERRITORY_RADIUS * 0.4),
+        y = r.range(TERRITORY_RADIUS * 0.4, w.H - TERRITORY_RADIUS * 0.4);
+      if (!vacantTerritory(w, x, y)) continue;
+      if (r.next() < 0.25) {
+        const edge = r.int(4);
+        const sx = edge === 0 ? 2 : edge === 1 ? w.W - 3 : x,
+          sy = edge === 2 ? 2 : edge === 3 ? w.H - 3 : y;
+        const np: Pack = { id: w.nextId(), name: names.packName(), x: sx, y: sy, px: sx, py: sy, n: 2, tx: x, ty: y, hunger: 0.3, targetHerd: -1, kills: 0, founded: w.day };
+        w.packs.push(np);
+        if (hooks.onPackFormed) hooks.onPackFormed(np, np);
+      }
+      break;
     }
   }
-}
-
-function deerTotal(w: World): number {
-  let n = 0;
-  for (const h of w.herds) n += h.n;
-  return n;
 }
 
 // ------------------------------------------------------------ beavers
@@ -412,9 +550,11 @@ function coloniesMonthly(w: World, hooks: WildlifeHooks): void {
         if (!w.inside(x + ox, y + oy)) continue;
         const j = (y + oy) * w.W + x + ox;
         food += L.aspen[j] * 1.4 + L.shrub[j] * 0.8;
+        // a colony cuts on the order of 1–2 ha of aspen and willow stems a year around its pond
+        // (v1.0 cut ~12 %/yr of the whole 49-ha neighbourhood for a family of six, ~10x regrowth)
         if (growing) {
-          L.aspen[j] = Math.max(0, L.aspen[j] - 0.0022 * c.n);
-          L.shrub[j] = Math.max(0, L.shrub[j] - 0.0016 * c.n);
+          L.aspen[j] = Math.max(0, L.aspen[j] - 0.0006 * c.n);
+          L.shrub[j] = Math.max(0, L.shrub[j] - 0.0005 * c.n);
         }
       }
     food /= 49;
@@ -450,9 +590,11 @@ function coloniesMonthly(w: World, hooks: WildlifeHooks): void {
     }
     // wolves take the odd beaver
     if (w.packs.some((p) => Math.hypot(p.x - x, p.y - y) < 4) && r.next() < 0.05) c.n--;
-    // yearly dispersal of young
-    if (w.month === 3 && c.active && food > 0.07 && c.n >= 3) {
-      if (c.n < 7) c.n += 2;
+    // spring kits: any breeding pair with food raises a litter (v1.0 only bred colonies of 3+, inside
+    // the dispersal step, so every colony founded by a dispersing pair stayed at 2 forever — D5)
+    if (w.month === 2 && c.active && c.n >= 2 && food > 0.05 && c.n < 8) c.n += Math.round(r.intRange(1, 4) * smoothstep(0.05, 0.12, food));
+    // two-year-olds disperse from crowded colonies to found new ones
+    if (w.month === 3 && c.active && food > 0.07 && c.n >= 5) {
       for (let k = 0; k < 30; k++) {
         const nx = x + r.intRange(-30, 30),
           ny = y + r.intRange(-30, 30);

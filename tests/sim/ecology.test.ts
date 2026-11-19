@@ -5,7 +5,10 @@ import { Simulation } from '../../src/sim/sim.ts';
 import { vegetationSummary } from '../../src/sim/systems/vegetation.ts';
 import { applyFireEffects } from '../../src/sim/systems/fire.ts';
 import { beetlesMonthly, beetleWinterKill } from '../../src/sim/systems/beetles.ts';
-import { deerCount } from '../../src/sim/systems/wildlife.ts';
+import { deerCount, wildlifeDaily, TERRITORY_RADIUS } from '../../src/sim/systems/wildlife.ts';
+import type { Herd } from '../../src/sim/types.ts';
+import { applyPlanting } from '../../src/sim/systems/projects.ts';
+import { SP } from '../../src/sim/types.ts';
 import { smallWorld } from '../helpers.ts';
 
 describe('ecology', () => {
@@ -87,5 +90,89 @@ describe('ecology', () => {
     expect(mild.killed).toBeGreaterThan(0.01);
     expect(mild.red).toBeGreaterThan(cold.red);
     expect(mild.killed).toBeGreaterThan(cold.killed * 1.5);
+  });
+
+  it('deer that crowd the same winter range end thinner (audit: condition was independent of numbers)', () => {
+    /** `k` herds of 30 held on one patch of snowy winter range for 45 days; mean condition after. */
+    const cond = (k: number) => {
+      const w = smallWorld('firstseason', 'herd-size');
+      w.packs = [];
+      const h0 = w.herds[0];
+      w.herds = Array.from({ length: k }, (_, j): Herd => ({ ...h0, id: 9000 + j, n: 30, cond: 0.8, fed: 1 }));
+      w.day = 300; // Still (winter): snow buries most of the grass
+      const hx = Math.floor(h0.x),
+        hy = Math.floor(h0.y);
+      for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) if (w.inside(hx + dx, hy + dy)) w.L.snow[(hy + dy) * w.W + hx + dx] = 80;
+      for (let d = 0; d < 45; d++) {
+        for (const h of w.herds) {
+          h.x = h0.x; // hold the herds in place: the test is about sharing a range
+          h.y = h0.y;
+        }
+        wildlifeDaily(w);
+        w.day++;
+      }
+      return w.herds.reduce((a, h) => a + h.cond, 0) / w.herds.length;
+    };
+    const one = cond(1),
+      ten = cond(10),
+      thirty = cond(30);
+    expect(one).toBeGreaterThanOrEqual(ten);
+    expect(ten).toBeGreaterThan(thirty);
+    expect(one - thirty).toBeGreaterThan(0.05); // v1.0: identical whatever the crowding
+  });
+
+  it('beaver pairs that found a colony breed and grow it (audit D5)', () => {
+    const w = smallWorld('firstseason', 'beaver-pair');
+    const c0 = w.colonies[0];
+    // a dispersing pair founds a new colony beside good food
+    w.colonies = [{ ...c0, id: 999, n: 2, years: 0, dam: 0.05 }];
+    for (let dy = -3; dy <= 3; dy++)
+      for (let dx = -3; dx <= 3; dx++) {
+        const i = c0.cell + dy * w.W + dx;
+        w.L.aspen[i] = Math.max(w.L.aspen[i], 0.3);
+        w.L.shrub[i] = Math.max(w.L.shrub[i], 0.4);
+      }
+    w.packs = [];
+    const sim = new Simulation(w, {}, { ignitions: false, autoReview: true });
+    sim.runDays(360 * 3);
+    const c = w.colonies.find((x) => x.id === 999)!;
+    expect(c.active).toBe(true);
+    expect(c.n).toBeGreaterThan(2); // v1.0: stuck at 2 for the rest of the run
+  }, 120000);
+
+  it('wolf numbers are bounded by territory and prey, not boom-and-bust', () => {
+    const w = generateWorld(makeConfig('custom', 'wolf-bound', 'medium', { wolves: 2, herds: 30 }));
+    const sim = new Simulation(w, {}, { ignitions: false, autoReview: true });
+    const areaKm2 = (w.W * w.H) / 100;
+    let maxDensity = 0,
+      wolfYears = 0;
+    for (let y = 0; y < 20; y++) {
+      sim.runDays(360);
+      const wolves = w.packs.reduce((a, p) => a + p.n, 0);
+      maxDensity = Math.max(maxDensity, (wolves / areaKm2) * 100);
+      if (wolves > 0) wolfYears++;
+      // no two territories closer than the spacing that bounds pack density
+      for (const a of w.packs) for (const b of w.packs) if (a !== b) expect(Math.hypot(a.tx - b.tx, a.ty - b.ty)).toBeGreaterThan(TERRITORY_RADIUS * 0.5);
+    }
+    // field densities: typically 1–5 wolves per 100 km², rarely above ~10 (v1.0 reached 15)
+    expect(maxDensity).toBeLessThan(10);
+    expect(wolfYears).toBeGreaterThanOrEqual(15);
+  }, 300000);
+
+  it('planting adds a young cohort instead of resetting old trees to age 1 (D4)', () => {
+    const w = smallWorld('firstseason', 'plant-age');
+    const i = 10 * w.W + 10;
+    w.L.pine[i] = 0.35;
+    w.L.ageP[i] = 170;
+    applyPlanting(w, i, SP.PINE);
+    expect(w.L.pine[i]).toBeCloseTo(0.44, 5);
+    expect(w.L.ageP[i]).toBeGreaterThan(130); // v1.0: 1
+    expect(w.L.ageP[i]).toBeLessThan(170);
+    // open ground: the cohort is the seedlings
+    const j = 12 * w.W + 12;
+    w.L.fir[j] = 0;
+    w.L.ageF[j] = 0;
+    applyPlanting(w, j, SP.FIR);
+    expect(w.L.ageF[j]).toBeCloseTo(1, 5);
   });
 });
