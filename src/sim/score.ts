@@ -34,15 +34,19 @@ function shareOf(xs: number[], ok: (x: number) => boolean, fallback: number): nu
 }
 
 /**
- * Grade bands, re-based in v1.1 on strategy bots (scripts/strategies.ts, 6 paired seeds each):
- * doing nothing and refusing every petition averages 74 (Tinderbox, 25 y, and First Season, 30 y)
- * — an A on v1.0's bands — and now earns a C; active stewardship averages 88 and 83.
+ * Grade bands. Re-based in v1.1 on that version's strategy bots, and again in 2.0 on its own
+ * (scripts/v2/bots.ts, verification seeds, whole tenures): doing nothing and refusing every petition
+ * averages 72 in the Tinderbox (8 valleys) and 71 in First Season (6) and earns a C; more crews,
+ * lookouts and air patrol with no work on the land averages 80, a B; thinning, burning and hardening
+ * homes from the Fireshed lens every year averages 89 in the Tinderbox, an A, and 94 in First Season.
+ * An S asks for all of that with nothing going wrong: the script reached 95 in five of fourteen
+ * tenures. (1.1's bands were 90 / 83 / 76 / 64 / 50.)
  */
 export const GRADES: Array<[number, string, string]> = [
-  [90, 'S', 'Legend of the Valley'],
-  [83, 'A', 'Steward of the Long Fire'],
-  [76, 'B', 'Trusted Warden'],
-  [64, 'C', 'Weathered Warden'],
+  [95, 'S', 'Legend of the Valley'],
+  [86, 'A', 'Steward of the Long Fire'],
+  [78, 'B', 'Trusted Warden'],
+  [65, 'C', 'Weathered Warden'],
   [50, 'D', 'Firefighter, Not a Forester'],
   [0, 'E', 'A Cautionary Tale'],
 ];
