@@ -280,6 +280,7 @@ function decayTreatments(w: World): void {
   for (let i = 0; i < w.N; i++) {
     if (L.retard[i] > 0) L.retard[i] = Math.max(0, L.retard[i] - 0.12 - rain);
     if (L.wet[i] > 0) L.wet[i] = Math.max(0, L.wet[i] - 0.35);
-    if (L.fline[i] > 0) L.fline[i] = Math.max(0, L.fline[i] - 0.004);
+    // (v2: a scraped line is good for a few weeks, not for a year: leaf fall and regrowth close it)
+    if (L.fline[i] > 0) L.fline[i] = Math.max(0, L.fline[i] - 0.012);
   }
 }

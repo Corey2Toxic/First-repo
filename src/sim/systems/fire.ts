@@ -117,9 +117,9 @@ export function surfaceFlameLength(I: number): number {
 export function crownFlameLength(I: number): number {
   return 0.0266 * Math.pow(Math.max(0, I), 2 / 3);
 }
-/** Canopy base height (m) implied by ladder-fuel continuity: ~9 m in open old pine, well under 1 m in a thicket. */
+/** Canopy base height (m) implied by ladder-fuel continuity: ~9 m in open old pine, about half a metre in a thicket. */
 export function canopyBaseHeight(ladder: number): number {
-  return 0.3 + 9.5 * Math.pow(1 - clamp01(ladder), 4);
+  return 0.5 + 9 * Math.pow(1 - clamp01(ladder), 3);
 }
 /** Van Wagner's (1977) critical surface intensity (kW/m) for crown-fire initiation. */
 export function crownInitiationIntensity(cbh: number, foliarMoisturePct: number): number {
@@ -575,7 +575,10 @@ function spreadRates(env: SpreadEnv, w: World, b: number, n: number, d: number, 
   const e = Math.sqrt(1 - 1 / (LB * LB));
   const dir = (1 - e) / (1 - e * cosT);
   // m/h → cells/h; fireline scraped to mineral soil stops surface fire
-  let R = (head / 100) * dir * sf * env.spread * (1 - L.fline[n]);
+  // a line scraped to mineral soil stops surface fire, unless the flames are long enough to reach
+  // across it (v1.x: any line stopped any surface fire, so a ring of hand line beat every other defence)
+  const lineHold = L.fline[n] * (1 - smoothstep(2, 4.5, L.fint[b]));
+  let R = (head / 100) * dir * sf * env.spread * (1 - lineHold);
   let Rc = 0;
   if (crownSrc && f.canopy > 0.3) {
     const canopyCov = L.pine[n] + L.fir[n] + L.aspen[n] * 0.6;
@@ -857,6 +860,9 @@ export function fireSubstep(w: World, hooks: FireStepHooks = {}): void {
     if (!fe) continue;
     if (kind === 2) {
       igniteStructure(w, n, fe);
+      // a prescribed burn that sets a house alight has escaped (v1.x: 14 homes burned in one burn
+      // that then closed as a success)
+      checkEscape(w, fe, n, hooks);
       scheduleFrom(ctx, n, t, false);
       continue;
     }
@@ -867,6 +873,7 @@ export function fireSubstep(w: World, hooks: FireStepHooks = {}): void {
         const p = 0.22 * (1 - 0.75 * (town ? town.firewise : 0)) * (1 - structureProtection(w, n));
         if (r.next() < p) {
           igniteStructure(w, n, fe);
+          checkEscape(w, fe, n, hooks);
           scheduleFrom(ctx, n, t, false);
         }
         continue;
@@ -910,6 +917,9 @@ export function fireSubstep(w: World, hooks: FireStepHooks = {}): void {
     if (isStructure) L.ftime[b] -= HOURS;
     else {
       const pot = potScratch[b];
+      // a crown front is a source of crown runs for the step it arrives in and the one after: then
+      // its canopy is gone and what is left is a surface fire (and something a crew can approach)
+      if (L.crown[b] === 1) L.crown[b] = 2;
       if (L.fphase[b] === 0 && pot >= R_MIN) {
         // an advancing front: its flames are those of the fastest spread it is making now (so an
         // edge lies down at night and on the flanks), and it stays alight while it keeps moving
@@ -964,17 +974,22 @@ function crossesBarrier(w: World, a: number, b: number): boolean {
   return false;
 }
 
-/** Engines protecting a town reduce the chance houses catch. */
+/**
+ * Engines protecting a town reduce the chance houses catch. v2: every engine within reach counts,
+ * with diminishing returns, whether it was sent to the fire or is standing by at its station
+ * (v1.x took the best single engine and only if it was `working`: a second engine was worth
+ * nothing and an engine at home in a burning town did nothing).
+ */
 export function structureProtection(w: World, i: number): number {
   const x = i % w.W,
     y = (i / w.W) | 0;
-  let p = 0;
+  let miss = 1;
   for (const c of w.crews) {
-    if (c.kind !== 'engine' || c.state !== 'working') continue;
+    if (c.kind !== 'engine' || c.state === 'moving' || c.state === 'returning') continue;
     const d = Math.hypot(c.x - x - 0.5, c.y - y - 0.5);
-    if (d < 5) p = Math.max(p, 0.7 * (1 - d / 6));
+    if (d < 5) miss *= 1 - 0.6 * (1 - d / 6);
   }
-  return p;
+  return Math.min(0.9, 1 - miss);
 }
 
 function igniteStructure(w: World, i: number, fe: FireEvent): void {
@@ -999,7 +1014,8 @@ function checkEscape(w: World, fe: FireEvent, cell: number, hooks: FireStepHooks
   if (!projectContains(w, pr.id, cell)) {
     fe.cause = 'escaped';
     fe.response = 'suppress';
-    fe.name = fe.name.replace(/ Fire$/, ' Escape');
+    // (v1.x looked for "… Fire" in a name that ends "… Rx Burn", so an escape kept its burn's name)
+    fe.name = fe.name.replace(/ (Rx Burn|Fire)$/, ' Escape');
     w.counters.yearEscapes++;
     w.memory.totalEscapes = (w.memory.totalEscapes ?? 0) + 1;
     if (hooks.onEscape) hooks.onEscape(fe);
@@ -1032,7 +1048,7 @@ export function projectContains(w: World, projectId: number, cell: number): bool
 export const SEVERITY_FLAME = 1.5;
 function burnout(w: World, i: number, fe: FireEvent | undefined, hooks: FireStepHooks): void {
   const L = w.L;
-  const crown = L.crown[i] === 1;
+  const crown = L.crown[i] !== 0;
   L.fire[i] = FIRE.BURNT;
   if (L.town[i] > 0) {
     // a structure lost
@@ -1088,6 +1104,9 @@ export function applyFireEffects(w: World, i: number, sev: number): void {
   if (L.pine[i] < 1e-3) L.ageP[i] = 0;
   // young fir and pine thin out under surface fire → the stand opens up
   if (sev === 1 && L.ageF[i] < 40) L.fir[i] *= 0.4;
+  // saplings have thin bark and crowns within reach of any flame: this is how frequent fire keeps a
+  // stand open, and what a prescribed burn buys
+  L.under[i] *= sev === 1 ? 0.25 : sev === 2 ? 0.06 : 0;
   L.snag[i] = L.snag[i] * (1 - 0.15 * s) + killed * (sev === 3 ? 0.9 : 1);
   // surface fuels consumed
   L.litter[i] *= sev === 1 ? 0.25 : sev === 2 ? 0.12 : 0.05;

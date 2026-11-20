@@ -15,6 +15,9 @@ export interface CellFuel {
   green: number; // live greenness 0..1
 }
 
+/** How much a full understory adds to ladder-fuel continuity. */
+export const UNDER_LADDER = 0.65;
+
 export function cellFuel(w: World, i: number, out?: CellFuel): CellFuel {
   const L = w.L;
   const g = greenness(w, i);
@@ -27,10 +30,13 @@ export function cellFuel(w: World, i: number, out?: CellFuel): CellFuel {
   const fine = L.litter[i] + grassFuel + shrubFine + L.red[i] * 10 + L.slash[i] * 0.45;
   const youngFir = 1 - smoothstep(25, 90, L.ageF[i]);
   const youngPine = 1 - smoothstep(12, 50, L.ageP[i]);
+  // v2: the understory (saplings and pole thickets beneath or between the big trees) is the main
+  // ladder. v1.x had only one mean age per species, so an old stand with a century of regeneration
+  // under it read as an old stand: nothing in a generated "Tinderbox" valley could torch.
   const ladder = clamp01(
-    L.shrub[i] * 0.55 + L.fir[i] * (0.3 + 0.7 * youngFir) * 0.9 + L.pine[i] * youngPine * 0.55 + L.slash[i] / 40 + L.snag[i] / 220,
+    L.shrub[i] * 0.55 + L.fir[i] * (0.3 + 0.7 * youngFir) * 0.9 + L.pine[i] * youngPine * 0.55 + L.slash[i] / 40 + L.snag[i] / 220 + L.under[i] * UNDER_LADDER,
   );
-  const canopy = clamp01(L.pine[i] * 0.72 + L.fir[i] * 1.0 + L.aspen[i] * 0.1 + L.red[i] * 1.3);
+  const canopy = clamp01(L.pine[i] * 0.72 + L.fir[i] * 1.0 + L.aspen[i] * 0.1 + L.red[i] * 1.3 + L.under[i] * 0.12);
   const heavy = L.dead[i] + L.snag[i] * 0.3 + L.slash[i];
   const o = out ?? { fine: 0, grassShare: 0, ladder: 0, canopy: 0, heavy: 0, green: 0 };
   o.fine = fine;

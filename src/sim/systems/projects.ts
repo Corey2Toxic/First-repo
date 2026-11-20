@@ -10,7 +10,10 @@ import { FIRE, INFRA, SP, ZONE } from '../types.ts';
 import type { FireEvent, Project, ProjectKind } from '../types.ts';
 import { COST, REVENUE } from '../economyParams.ts';
 import { cellFuel } from './fuels.ts';
-import { startFire, igniteCell, projectContains, forgetProjectUnit } from './fire.ts';
+import { R_MIN, frontBehaviour, forgetProjectUnit, igniteCell, isBurnable, projectContains, spreadEnvFor, startFire, surfaceHeadRate } from './fire.ts';
+import type { CellFuel } from './fuels.ts';
+import { droughtSeverity } from './climate.ts';
+import { forecast } from '../forecast.ts';
 import type { World } from '../world.ts';
 
 export const PROJECT_NAMES: Record<ProjectKind, string> = {
@@ -59,39 +62,87 @@ function nearestTownName(w: World, x: number, y: number): string {
   return best;
 }
 
-export function createProject(w: World, kind: ProjectKind, cells: number[], species: number = SP.PINE): Project | null {
-  const unit = validProjectCells(w, kind, cells).sort((a, b) => a - b);
-  if (unit.length === 0) return null;
-  let sx = 0,
-    sy = 0;
-  for (const c of unit) {
-    sx += c % w.W;
-    sy += (c / w.W) | 0;
+/** Largest burn unit one operation can fire and hold (ha). Larger selections become several units. */
+export const MAX_BURN_UNIT = 300;
+
+/**
+ * Queue a treatment on the valid cells of a selection. A prescribed burn larger than MAX_BURN_UNIT
+ * is split into contiguous units of at most that size (v1.x let one crew light and "hold" a
+ * 5,000-ha unit). Returns the projects created (empty when nothing in the selection can be treated).
+ */
+export function createProjects(w: World, kind: ProjectKind, cells: number[], species: number = SP.PINE): Project[] {
+  const valid = validProjectCells(w, kind, cells).sort((a, b) => a - b);
+  if (valid.length === 0) return [];
+  const units: number[][] = [];
+  if (kind !== 'burn' || valid.length <= MAX_BURN_UNIT) units.push(valid);
+  else {
+    // grow compact blobs outward from the lowest remaining cell
+    const left = new Set(valid);
+    for (const seed of valid) {
+      if (!left.has(seed)) continue;
+      const unit: number[] = [];
+      const queue = [seed];
+      left.delete(seed);
+      while (queue.length && unit.length < MAX_BURN_UNIT) {
+        const c = queue.shift()!;
+        unit.push(c);
+        const x = c % w.W,
+          y = (c / w.W) | 0;
+        for (let d = 0; d < 8; d += 2) {
+          const nx = x + DX8[d],
+            ny = y + DY8[d];
+          if (!w.inside(nx, ny)) continue;
+          const n = ny * w.W + nx;
+          if (left.has(n)) {
+            left.delete(n);
+            queue.push(n);
+          }
+        }
+      }
+      // cells queued but not taken go back for the next unit
+      for (const c of queue) left.add(c);
+      units.push(unit.sort((a, b) => a - b));
+    }
   }
-  const cx = sx / unit.length,
-    cy = sy / unit.length;
-  const pr: Project = {
-    id: w.nextId(),
-    kind,
-    unit,
-    todo: unit.slice(),
-    done: 0,
-    progress: 0,
-    status: 'queued',
-    species,
-    createdDay: w.day,
-    doneDay: -1,
-    costPerCell: projectCostPerCell(kind, w),
-    spent: 0,
-    label: `${PROJECT_NAMES[kind]} near ${nearestTownName(w, cx, cy)} (${unit.length} ha)`,
-    fireId: -1,
-    burnDays: 0,
-    waitDays: 0,
-    cx,
-    cy,
-  };
-  w.projects.push(pr);
-  return pr;
+  const out: Project[] = [];
+  for (const unit of units) {
+    let sx = 0,
+      sy = 0;
+    for (const c of unit) {
+      sx += c % w.W;
+      sy += (c / w.W) | 0;
+    }
+    const cx = sx / unit.length,
+      cy = sy / unit.length;
+    const pr: Project = {
+      id: w.nextId(),
+      kind,
+      unit,
+      todo: unit.slice(),
+      done: 0,
+      progress: 0,
+      status: 'queued',
+      species,
+      createdDay: w.day,
+      doneDay: -1,
+      costPerCell: projectCostPerCell(kind, w),
+      spent: 0,
+      label: `${PROJECT_NAMES[kind]} near ${nearestTownName(w, cx, cy)} (${unit.length} ha)`,
+      fireId: -1,
+      burnDays: 0,
+      waitDays: 0,
+      cx,
+      cy,
+    };
+    w.projects.push(pr);
+    out.push(pr);
+  }
+  return out;
+}
+
+/** Queue one treatment (the first unit if the selection had to be split). */
+export function createProject(w: World, kind: ProjectKind, cells: number[], species: number = SP.PINE): Project | null {
+  return createProjects(w, kind, cells, species)[0] ?? null;
 }
 
 export function cancelProject(w: World, pr: Project): void {
@@ -102,12 +153,13 @@ export function cancelProject(w: World, pr: Project): void {
 
 /** Nearest untreated cell of a project to a given cell. */
 export function projectWorkCell(w: World, pr: Project, from: number): number {
-  if (pr.kind === 'burn') return Math.round(pr.cy) * w.W + Math.round(pr.cx);
   let best = -1,
     bd = Infinity;
   const fx = from % w.W,
     fy = (from / w.W) | 0;
-  for (const c of pr.todo) {
+  // a burn is staged from the edge of its unit nearest the crew (v1.x sent the crew to the unit's
+  // centroid, which for a unit round a lake or a beaver pond is water nobody can reach)
+  for (const c of pr.kind === 'burn' ? pr.unit : pr.todo) {
     const d = Math.abs((c % w.W) - fx) + Math.abs(((c / w.W) | 0) - fy);
     if (d < bd) {
       bd = d;
@@ -140,6 +192,7 @@ export function applyThinning(w: World, i: number): void {
   const youngF = L.ageF[i] < 60,
     youngP = L.ageP[i] < 40;
   L.shrub[i] *= 0.3;
+  L.under[i] *= 0.1;
   L.fir[i] *= youngF ? 0.15 : 0.6;
   L.pine[i] *= youngP ? 0.35 : 0.82;
   L.aspen[i] *= 0.9;
@@ -190,6 +243,7 @@ export function applyFuelbreak(w: World, i: number): void {
   L.pine[i] *= 0.35; // shaded fuel break keeps some big pines
   L.aspen[i] *= 0.6;
   L.shrub[i] *= 0.1;
+  L.under[i] = 0;
   L.litter[i] *= 0.25;
   L.dead[i] *= 0.3;
   L.snag[i] *= 0.2;
@@ -208,6 +262,7 @@ export function maintainFuelbreaks(w: World): number {
     if (!(L.infra[i] & INFRA.FUELBREAK)) continue;
     n++;
     L.shrub[i] = Math.min(L.shrub[i], 0.08);
+    L.under[i] = Math.min(L.under[i], 0.05);
     L.fir[i] = Math.min(L.fir[i], 0.05);
     L.pine[i] = Math.min(L.pine[i], 0.25);
     L.litter[i] = Math.min(L.litter[i], 3);
@@ -228,14 +283,67 @@ export function unitFuelMoisture(w: World, pr: Project): number {
   return n ? s / n : 0.3;
 }
 
-export function burnWindowOpen(w: World, pr: Project): boolean {
+/** Hand crews needed to light and hold a unit: one to 80 ha, two to 200, three beyond. */
+export function burnCrewsNeeded(pr: Project): number {
+  return pr.unit.length <= 80 ? 1 : pr.unit.length <= 200 ? 2 : 3;
+}
+
+export interface BurnOutlook {
+  /** share of the unit where fire would carry this afternoon (0..1) */
+  carry: number;
+  /** share of the unit where it would torch or flame beyond what a crew can hold (0..1) */
+  hot: number;
+  /** why the burn is out of prescription today, or '' when it can be lit */
+  problem: string;
+}
+
+const outlookFuel: CellFuel = { fine: 0, grassShare: 0, ladder: 0, canopy: 0, heavy: 0, green: 0 };
+
+/**
+ * The burn boss's go/no-go for today: will fire carry across the unit this afternoon, and will it
+ * stay on the ground? Uses the fire model's own rates and crowning rule on a sample of the unit, so
+ * the prescription and the fire agree (v1.x's window admitted fuel up to 22 % moisture, far too damp
+ * for its own fire model to carry: spring burns covered a median 6–22 % of their units).
+ */
+export function burnOutlook(w: World, pr: Project): BurnOutlook {
+  const L = w.L;
   const wx = w.weather;
-  if (wx.dangerClass > 1 || wx.windSpeed > 6.5 || wx.precip > 1 || wx.windEvent) return false;
-  const fm = unitFuelMoisture(w, pr);
-  if (fm < 0.075 || fm > 0.22) return false;
-  let snowy = 0;
-  for (let k = 0; k < pr.unit.length; k += 5) if (w.L.snow[pr.unit[k]] > 5) snowy++;
-  return snowy < pr.unit.length / 25;
+  const drought = droughtSeverity(w.climate.droughtIndex);
+  // mid-afternoon, the hour the unit is fired for
+  const env = spreadEnvFor(4, wx, drought);
+  let n = 0,
+    carry = 0,
+    hot = 0,
+    snowy = 0;
+  const step = Math.max(1, Math.floor(pr.unit.length / 40));
+  for (let k = 0; k < pr.unit.length; k += step) {
+    const c = pr.unit[k];
+    n++;
+    if (L.snow[c] > 5) {
+      snowy++;
+      continue;
+    }
+    const f = cellFuel(w, c, outlookFuel);
+    // a strip-fired unit burns mostly as backing and flanking fire: about a third of the head rate
+    const head = (surfaceHeadRate(w, c, f, env.windEff, L.fm[c] + env.fmAdd) / 100) * env.spread;
+    if (head >= 4 * R_MIN) carry++;
+    const b = frontBehaviour(w, c, f, head * 0.35, 0);
+    if (b.crown || b.flame > 1.6) hot++;
+  }
+  const out: BurnOutlook = { carry: n ? carry / n : 0, hot: n ? hot / n : 0, problem: '' };
+  if (snowy > n * 0.2) out.problem = 'Snow on the unit.';
+  else if (wx.precip > 1) out.problem = 'Rain today.';
+  else if (wx.windEvent || wx.windSpeed > 6.5) out.problem = 'Too windy to hold a burn.';
+  else if (wx.dangerClass > 1) out.problem = 'Fire danger is too high.';
+  else if (out.hot > 0.12) out.problem = 'Too dry: parts of the unit would torch.';
+  else if (out.carry < 0.55) out.problem = 'Fuels are too damp to carry fire.';
+  else if (w.policies.smokeRules && wx.dispersion < 0.5) out.problem = 'Poor smoke dispersal (smoke rules).';
+  else if (forecast(w, 2).some((d) => d.windEventChance >= 0.5)) out.problem = 'A wind event is forecast.';
+  return out;
+}
+
+export function burnWindowOpen(w: World, pr: Project): boolean {
+  return burnOutlook(w, pr).problem === '';
 }
 
 /** Cells surrounding a unit (outside it) — where the control line goes. */
@@ -256,7 +364,25 @@ export function unitRing(w: World, pr: Project): number[] {
   return Array.from(ring).sort((a, b) => a - b);
 }
 
-export function igniteProjectBurn(w: World, pr: Project): FireEvent | null {
+/** Ignition points one hand crew lays in a day of firing. */
+export const FIRING_POINTS_PER_CREW = 14;
+
+/** Light up to `points` evenly spread unburned cells of the unit. Returns how many were lit. */
+function fireUnit(w: World, pr: Project, fe: FireEvent, points: number): number {
+  const L = w.L;
+  const unburned = pr.unit.filter((c) => L.fire[c] === FIRE.NONE && w.yearF - L.lastBurn[c] > 0.2);
+  if (unburned.length === 0 || points <= 0) return 0;
+  const stride = Math.max(1, Math.floor(unburned.length / points));
+  let lit = 0;
+  // start mid-stride so successive days do not re-walk the same lattice
+  for (let k = (pr.burnDays * 3) % stride; k < unburned.length && lit < points; k += stride) {
+    igniteCell(w, unburned[k], fe, 0.4, false);
+    lit++;
+  }
+  return lit;
+}
+
+export function igniteProjectBurn(w: World, pr: Project, crews = 1): FireEvent | null {
   const L = w.L;
   // the unit was checked when it was planned; homes or facilities built since
   // then are taken out of it (fire reaching them is then an escape)
@@ -270,23 +396,15 @@ export function igniteProjectBurn(w: World, pr: Project): FireEvent | null {
     return null;
   }
   for (const c of unitRing(w, pr)) L.fline[c] = 1;
-  // light a pattern of ignition points across the unit
-  const r = w.rng.fire;
-  let fe: FireEvent | null = null;
-  const pts = pr.unit.filter((_, k) => k % 12 === 0);
-  for (const c of pts) {
-    if (L.fire[c] !== FIRE.NONE) continue;
-    if (!fe) {
-      fe = startFire(w, c, 'prescribed', pr.id);
-      if (fe) {
-        fe.name = pr.label.replace(/^Prescribed burn near /, '').replace(/ \(\d+ ha\)$/, '') + ' Rx Burn';
-      }
-    } else if (r.next() < 0.8) igniteCell(w, c, fe, 0.4, false);
-  }
+  const first = pr.unit.find((c) => L.fire[c] === FIRE.NONE && isBurnable(w, c));
+  if (first === undefined) return null;
+  const fe = startFire(w, first, 'prescribed', pr.id);
   if (!fe) return null;
+  fe.name = pr.label.replace(/^Prescribed burn near /, '').replace(/ \(\d+ ha\)$/, '') + ' Rx Burn';
   pr.status = 'burning';
   pr.fireId = fe.id;
   pr.burnDays = 0;
+  fireUnit(w, pr, fe, FIRING_POINTS_PER_CREW * Math.max(1, crews) - 1);
   w.memory.rxSmokeDays++;
   w.dirty.fire++;
   return fe;
@@ -294,10 +412,9 @@ export function igniteProjectBurn(w: World, pr: Project): FireEvent | null {
 
 /** Daily burn management: strip-light unburned parts, finish when out. */
 export function projectsDaily(w: World): void {
-  const L = w.L;
   for (const pr of w.projects) {
     if (pr.kind !== 'burn') continue;
-    if (pr.status === 'waiting' || pr.status === 'active') pr.waitDays++;
+    if (pr.status === 'waiting' || pr.status === 'active' || pr.status === 'queued') pr.waitDays++;
     if (pr.status !== 'burning') continue;
     pr.burnDays++;
     const fe = w.fires.find((f) => f.id === pr.fireId);
@@ -305,10 +422,11 @@ export function projectsDaily(w: World): void {
       finishBurn(w, pr);
       continue;
     }
-    if (pr.burnDays <= 4 && w.weather.dangerClass <= 2 && w.weather.windSpeed < 8) {
-      // strip-ignite more of the unit
-      const unburned = pr.unit.filter((c) => L.fire[c] === FIRE.NONE && w.yearF - L.lastBurn[c] > 0.2);
-      for (let k = 0; k < unburned.length; k += 6) igniteCell(w, unburned[k], fe, 0.4, false);
+    // once a burn has escaped, crews stop lighting and fight it (v1.x went on strip-lighting)
+    if (fe.cause !== 'prescribed') continue;
+    const crews = w.crews.filter((c) => c.task?.projectId === pr.id && c.state !== 'moving').length;
+    if (crews > 0 && pr.burnDays <= 8 && w.weather.dangerClass <= 2 && w.weather.windSpeed < 8 && !w.weather.windEvent && w.weather.precip < 1) {
+      fireUnit(w, pr, fe, FIRING_POINTS_PER_CREW * crews);
     }
   }
 }

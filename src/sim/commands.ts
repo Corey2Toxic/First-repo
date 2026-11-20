@@ -7,7 +7,7 @@ import { astar } from './grid.ts';
 import { FIRE, INFRA, SP, ZONE } from './types.ts';
 import type { CrewKind, FireResponse, Policies, ProjectKind } from './types.ts';
 import { COST, CREW_COST } from './economyParams.ts';
-import { cancelProject, createProject, zoneConflict } from './systems/projects.ts';
+import { MAX_BURN_UNIT, cancelProject, createProjects, zoneConflict } from './systems/projects.ts';
 import { aidFor, aidProblem, assignToFire, crewCell, fireById, planPath, releaseAid, releaseProject, requestAid } from './systems/crews.ts';
 import { makeCrew } from './gen/crews.ts';
 import { layRoad, roadCost } from './gen/settle.ts';
@@ -50,6 +50,25 @@ export interface CommandResult {
 }
 
 const fail = (msg: string): CommandResult => ({ ok: false, msg });
+
+/** The air tanker: loads it can fly in a day, and the wind (m/s) above which it stays on the ground. */
+export const TANKER_LOADS_PER_DAY = 6;
+export const TANKER_MAX_WIND = 13;
+/** How far into debt emergency fire spending may take the service before the county stops paying. */
+export const EMERGENCY_CREDIT = 400_000;
+
+/**
+ * Planned spending needs the money in hand. v1.x checked funds nowhere: towers, crews and wolves
+ * could be bought with the service in debt, and the only consequence came at the annual review.
+ */
+function fundsProblem(w: World, cost: number): string {
+  if (w.economy.funds >= cost) return '';
+  return `Not enough funds: this costs $${Math.round(cost / 1000)}k and the service has $${Math.round(w.economy.funds / 1000)}k.`;
+}
+/** Emergency fire spending (air drops, outside teams) may run the service into debt, up to a limit. */
+function emergencyFundsProblem(w: World, cost: number): string {
+  return w.economy.funds - cost >= -EMERGENCY_CREDIT ? '' : 'The county will not extend more emergency credit: the service is too deep in debt.';
+}
 
 /** Estimate a command's up-front cost without applying it (for UI previews). */
 export function estimateCost(w: World, cmd: Command): number {
@@ -203,9 +222,12 @@ function apply(w: World, cmd: Command): CommandResult {
     }
     case 'project': {
       const cells = zoneConflict(w, cmd.kind, cmd.cells) ? cmd.cells.filter((c) => L.zone[c] !== ZONE.WILDERNESS) : cmd.cells;
-      const pr = createProject(w, cmd.kind, cells, cmd.species);
-      if (!pr) return fail('No suitable ground for that treatment in the selection.');
-      return { ok: true, msg: `${pr.label} queued — est. $${Math.round(pr.costPerCell * pr.unit.length).toLocaleString()}.`, cost: pr.costPerCell * pr.unit.length };
+      const made = createProjects(w, cmd.kind, cells, cmd.species);
+      if (made.length === 0) return fail('No suitable ground for that treatment in the selection.');
+      const ha = made.reduce((a, p) => a + p.unit.length, 0);
+      const cost = made.reduce((a, p) => a + p.costPerCell * p.unit.length, 0);
+      const what = made.length === 1 ? made[0].label : `${made.length} burn units (${ha} ha; a unit is at most ${MAX_BURN_UNIT} ha)`;
+      return { ok: true, msg: `${what} queued — est. $${Math.round(cost).toLocaleString()}.`, cost };
     }
     case 'cancelProject': {
       const pr = w.projects.find((p) => p.id === cmd.id);
@@ -231,7 +253,7 @@ function apply(w: World, cmd: Command): CommandResult {
         releaseAid(w, team);
         return { ok: true, msg: 'The incident team has been sent home' + (fe ? ' from the ' + fe.name : '') + '.' };
       }
-      const problem = aidProblem(w, fe);
+      const problem = aidProblem(w, fe) || emergencyFundsProblem(w, COST.aidMobilize);
       if (problem || !fe) return fail(problem || 'That fire is out.');
       const team = requestAid(w, fe);
       const wait = team.arriveDay - w.day;
@@ -293,33 +315,59 @@ function apply(w: World, cmd: Command): CommandResult {
       if (cells.length === 0) return fail('Cannot cut line there.');
       let c = cmd.crewId !== undefined ? w.crews.find((x) => x.id === cmd.crewId) : undefined;
       if (cmd.crewId !== undefined && !c) return fail('No such crew.');
-      if (c && c.kind === 'heli') return fail('Helicopters cannot cut fireline.');
+      if (c && c.kind !== 'hand') return fail('Only hand crews cut fireline.');
+      const first = cells[0];
+      const fx = first % w.W,
+        fy = (first / w.W) | 0;
+      type C = (typeof w.crews)[number];
+      const holdingBurn = (x: C) => x.task?.kind === 'project' && w.projects.some((p) => p.id === x.task!.projectId && p.status === 'burning');
+      // an outside team cuts line for the fire it came for, not round the valley
+      const aidOk = (x: C) => {
+        if (x.aid === undefined) return true;
+        const fe = fireById(w, x.aid);
+        return !!fe && fx >= fe.minX - 25 && fx <= fe.maxX + 25 && fy >= fe.minY - 25 && fy <= fe.maxY + 25;
+      };
       if (!c) {
-        // nearest available hand crew (idle first, then busy on projects)
-        const first = cells[0];
-        const fx = first % w.W,
-          fy = (first / w.W) | 0;
-        const holdingBurn = (x: (typeof w.crews)[number]) => x.task?.kind === 'project' && w.projects.some((p) => p.id === x.task!.projectId && p.status === 'burning');
-        const pool = w.crews.filter((x) => x.kind !== 'heli' && (x.state === 'idle' || (x.task?.kind === 'project' && !x.manual && !holdingBurn(x))));
-        pool.sort((a, b) => Math.hypot(a.x - fx, a.y - fy) - Math.hypot(b.x - fx, b.y - fy));
+        // the nearest hand crew that is not already on an order of the warden's or holding a burn:
+        // idle crews first, then crews the dispatcher has on a fire or on treatment work (v1.x
+        // refused whenever the dispatcher had the crews, which is exactly when a line is wanted)
+        const pool = w.crews.filter((x) => x.kind === 'hand' && !x.manual && !holdingBurn(x) && x.fatigue <= 0.95 && aidOk(x));
+        const rank = (x: C) => (x.state === 'idle' ? 0 : 6) + Math.hypot(x.x - fx, x.y - fy);
+        pool.sort((a, b) => rank(a) - rank(b) || a.id - b.id);
         c = pool[0];
-      }
-      if (!c) return fail('No ground crew is free. Recall one first.');
-      const held = c.task?.projectId !== undefined ? w.projects.find((p) => p.id === c.task!.projectId) : undefined;
-      if (held && held.status === 'burning') return fail(`${c.name} is holding a burn and cannot leave.`);
-      if (!planPath(w, c, cells[0])) return fail(`${c.name} cannot reach the line.`);
-      releaseProject(w, c);
-      c.task = { kind: 'line', cells };
-      c.manual = true;
-      c.state = 'moving';
-      return { ok: true, msg: `${c.name} cutting ${cells.length} cells of fireline.` };
+      } else if (!aidOk(c)) return fail(c.name + ' was sent for one fire only.');
+      if (!c) return fail('No hand crew is free to cut line.');
+      const crew = c;
+      const held = crew.task?.projectId !== undefined ? w.projects.find((p) => p.id === crew.task!.projectId) : undefined;
+      if (held && held.status === 'burning') return fail(`${crew.name} is holding a burn and cannot leave.`);
+      if (!planPath(w, crew, cells[0])) return fail(`${crew.name} cannot reach the line.`);
+      releaseProject(w, crew);
+      crew.task = { kind: 'line', cells };
+      crew.manual = true;
+      crew.state = 'moving';
+      return { ok: true, msg: `${crew.name} cutting ${(cells.length / 10).toFixed(1)} km of fireline.` };
     }
     case 'airdrop': {
       // each cell is paid for once (v1.0 charged repeated cells again)
       const cells = [...new Set(cmd.cells)].filter((i) => i >= 0 && i < w.N && L.water[i] < 2);
       if (cells.length === 0) return fail('Nothing to drop on.');
       const drops = Math.ceil(cells.length / 10);
+      // v2: there is one air tanker, and it is an aircraft. (v1.x: no aircraft and no limit; 40 loads
+      // were accepted in one order at night, in a gale, with the service half a million in debt.)
+      if (w.sub < 2 || w.sub > 6) return fail('The air tanker flies in daylight only.');
+      if (w.weather.windSpeed > TANKER_MAX_WIND) return fail('The air tanker is grounded: the wind is too strong to fly a drop.');
+      const m = w.memory;
+      const used = m.dropDay === w.day ? (m.dropsToday ?? 0) : 0;
+      if (used + drops > TANKER_LOADS_PER_DAY) {
+        const left = TANKER_LOADS_PER_DAY - used;
+        if (left > 0) return fail(`The tanker has ${left} load${left > 1 ? 's' : ''} left today (${TANKER_LOADS_PER_DAY} a day).`);
+        return fail(`The tanker has flown its ${TANKER_LOADS_PER_DAY} loads for today.`);
+      }
       const cost = drops * COST.retardantDrop;
+      const broke = emergencyFundsProblem(w, cost);
+      if (broke) return fail(broke);
+      m.dropDay = w.day;
+      m.dropsToday = used + drops;
       for (const i of cells) {
         L.retard[i] = 1;
         if (L.fire[i] === FIRE.BURNING && L.fint[i] < 3.4) L.fint[i] *= 0.4;
@@ -332,6 +380,8 @@ function apply(w: World, cmd: Command): CommandResult {
     case 'build': {
       const i = cmd.cell;
       if (i < 0 || i >= w.N || L.water[i] >= 2 || L.town[i] !== 0) return fail('Cannot build there.');
+      const short = fundsProblem(w, cmd.what === 'tower' ? COST.tower : COST.camp);
+      if (short) return fail(short);
       if (cmd.what === 'tower') {
         if (w.towers.some((t) => Math.hypot((t % w.W) - (i % w.W), ((t / w.W) | 0) - ((i / w.W) | 0)) < 12))
           return fail('Too close to an existing lookout.');
@@ -353,6 +403,8 @@ function apply(w: World, cmd: Command): CommandResult {
       const newCells = p.filter((c) => !(L.infra[c] & INFRA.ROAD)).length;
       if (newCells === 0) return fail('That road already exists.');
       const cost = newCells * COST.road;
+      const short = fundsProblem(w, cost);
+      if (short) return fail(short);
       layRoad(w, cmd.from, p);
       w.spend('Infrastructure', cost);
       w.memory.roadsBuilt = (w.memory.roadsBuilt ?? 0) + newCells;
@@ -361,6 +413,8 @@ function apply(w: World, cmd: Command): CommandResult {
     case 'hire': {
       const town = w.towns[cmd.townId ?? 0] ?? w.towns[0];
       if (!town) return fail('No town to base a crew in.');
+      const short = fundsProblem(w, CREW_COST[cmd.kind].hire);
+      if (short) return fail(short);
       const names = new NameBank(w.rng.misc.fork('crew' + w.crews.length));
       const n = w.crews.filter((c) => c.kind === cmd.kind).length + 1;
       const crew = makeCrew(w, cmd.kind, town.station, names.crewName(cmd.kind, n));
@@ -391,6 +445,8 @@ function apply(w: World, cmd: Command): CommandResult {
         y = ((i / w.W) | 0) + 0.5;
       for (const t of w.towns) if (Math.hypot(t.x - x, t.y - y) < 16) return fail('Too close to town for a release site.');
       if (w.packs.some((p) => Math.hypot(p.tx - x, p.ty - y) < 26)) return fail('A pack already holds that territory.');
+      const short = fundsProblem(w, COST.wolfReintro);
+      if (short) return fail(short);
       const names = new NameBank(w.rng.misc.fork('pack' + w.packs.length));
       w.packs.push({ id: w.nextId(), name: names.packName(), x, y, px: x, py: y, n: 5, tx: x, ty: y, hunger: 0.4, targetHerd: -1, kills: 0, founded: w.day });
       w.spend('Wildlife', COST.wolfReintro);
@@ -403,6 +459,8 @@ function apply(w: World, cmd: Command): CommandResult {
       const s = beaverSiteScore(w, i);
       if (s < 0.08) return fail('Beavers need a gentle stream with willow or aspen nearby.');
       if (w.colonies.some((c) => c.active && c.cell === i)) return fail('Already occupied.');
+      const short = fundsProblem(w, COST.beaverRelocation);
+      if (short) return fail(short);
       w.colonies.push({ id: w.nextId(), cell: i, n: 4, food: 0.6, dam: 0.1, years: 0, active: true, abandonedDay: -1 });
       w.spend('Wildlife', COST.beaverRelocation);
       return { ok: true, msg: 'A beaver family has been released.', cost: COST.beaverRelocation };

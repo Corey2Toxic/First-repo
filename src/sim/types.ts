@@ -163,6 +163,10 @@ export interface Project {
   waitDays: number;
   cx: number;
   cy: number;
+  /** v2: lower is worked first (default 0: in the order queued) */
+  priority?: number;
+  /** v2: why nobody is working it today ('' when someone is, or could) */
+  note?: string;
 }
 
 export interface Herd {

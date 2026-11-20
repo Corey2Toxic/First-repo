@@ -108,8 +108,24 @@ export function surroundingsSafety(w: World, t: Town): { near: number; buffer: n
   return { near: n ? safe / n : 0.5, buffer: ring ? clamp01(buf / (0.35 * ring)) : 0 };
 }
 
+/** Years a town needs to bring its existing houses up to the firewise code. */
+export const FIREWISE_YEARS = 5;
+
+/**
+ * Share of homes brought up to the firewise code so far (0..1). v2: adopting the code starts a
+ * five-year programme of home hardening that the service pays for (economy.ts); protection grows as
+ * houses are done. (v1.x: a free switch that gave its whole effect the next month, the single
+ * strongest fire decision in the game and not a decision at all.)
+ */
+export function firewiseProgress(w: World): number {
+  if (w.policies.buildingCode !== 'firewise') return 0;
+  const adopted = w.memory.codeAdoptedDay;
+  if (adopted === undefined) return 1; // a valley that began with the code
+  return clamp01((w.day - adopted) / (FIREWISE_YEARS * 360));
+}
+
 export function updateFirewise(w: World): void {
-  const code = w.policies.buildingCode === 'firewise' ? 1 : 0;
+  const code = firewiseProgress(w);
   for (const t of w.towns) {
     const s = surroundingsSafety(w, t);
     t.firewise = clamp01(0.1 + 0.32 * code + 0.45 * s.near + 0.15 * s.buffer);
@@ -131,6 +147,7 @@ export function maintainBuffers(w: World): number {
       if (!isTreated(w, i)) continue;
       L.litter[i] *= 0.7;
       L.shrub[i] *= 0.7;
+      L.under[i] *= 0.5;
       L.slash[i] *= 0.5;
       if (L.ageF[i] < 30) L.fir[i] *= 0.8;
       L.lastTreat[i] = w.yearF;
@@ -258,6 +275,7 @@ function expandTown(w: World, t: Town, count: number): void {
     placeStructure(w, i, t);
     L.zone[i] = ZONE.NONE;
     L.shrub[i] *= 0.4;
+    L.under[i] *= 0.2;
     L.fir[i] *= 0.4;
     L.litter[i] *= 0.6;
   }

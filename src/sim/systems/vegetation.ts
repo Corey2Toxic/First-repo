@@ -266,6 +266,17 @@ function updateCell(w: World, i: number, c: VegCache): void {
   if (shrub > shrubCap) shrub += (shrubCap - shrub) * 0.06;
   L.shrub[i] = clamp01(shrub);
 
+  // --- understory regeneration (v2) ---
+  // Seedlings establish wherever there is seed and a suitable site. With no fire to clear them they
+  // become the saplings and pole thickets that carry flame from the ground into the crowns: this is
+  // what a century of fire exclusion builds, and what a prescribed burn or a thinning crew removes.
+  // Shade-tolerant fir comes in under any canopy; pine needs light. Cattle and deer hold it back a
+  // little, and a mature thicket slowly thins itself.
+  let u = L.under[i];
+  u += UNDER_RATE * regenSite(L.seedF[i] * sF, L.seedP[i] * sP, Math.min(1, total / cap), groundLight) * (1 - u) * gT * (1 - 0.35 * graze) * (1 - 0.4 * browse) * dt;
+  u -= 0.006 * u * dt;
+  L.under[i] = clamp01(u);
+
   // --- litter and dead fuels (t/ha) ---
   const autumn = w.month >= 6 && w.month <= 8;
   const litterIn = (1.6 * np + 1.3 * nf + (autumn ? 1.2 * na * 4 : 0) + (autumn ? 1.1 * L.grass[i] * 4 : 0) + 0.4 * L.shrub[i]) * dt;
@@ -280,6 +291,43 @@ function updateCell(w: World, i: number, c: VegCache): void {
   L.slash[i] = Math.max(0, L.slash[i] - L.slash[i] * 0.12 * dt);
   L.fert[i] = Math.max(0, L.fert[i] - L.fert[i] * 0.35 * dt);
   L.hydro[i] = Math.max(0, L.hydro[i] - L.hydro[i] * 0.55 * dt);
+}
+
+/** Understory growth rate per year at full regeneration in the growing season (about half as much over a whole year). */
+export const UNDER_RATE = 0.115;
+/** The same as an effective whole-year rate constant, for reconstructing a stand's understory from its fire history. */
+const UNDER_YEARLY = 0.05;
+
+/** How well a site regenerates beneath its canopy, 0..1: fir by seed and shade, pine by seed and light. */
+export function regenSite(firSeed: number, pineSeed: number, stocking: number, groundLight: number): number {
+  return Math.min(1, Math.max(firSeed * (0.45 + 0.55 * stocking), pineSeed * 0.9 * groundLight) * 1.4);
+}
+
+/**
+ * The understory a stand would have grown since fire or a crew last cleared it. Used at world
+ * generation (each cell's time since fire comes from its site's fire regime, or from a century of
+ * suppression) and to fill the layer when a save from before v2 is loaded.
+ */
+export function initUnderstory(w: World): void {
+  const L = w.L;
+  const c = vegCache(w);
+  for (let i = 0; i < w.N; i++) {
+    if (L.water[i]) {
+      L.under[i] = 0;
+      continue;
+    }
+    const can = L.aspen[i] + L.pine[i] + L.fir[i];
+    const cap = Math.max(0.05, c.cap[i] * lerp(0.72, 1, L.soil[i]));
+    const light = clamp01(1 - 0.85 * (L.pine[i] * 0.8 + L.fir[i] * 1.05 + L.aspen[i] * 0.55));
+    // seed comes from the stand itself (the seed-rain maps do not exist yet at generation)
+    const seedF = Math.min(1, L.fir[i] * 1.6 + 0.08),
+      seedP = Math.min(1, L.pine[i] * 1.6 + 0.08);
+    const site = regenSite(seedF * c.suit[SP.FIR][i], seedP * c.suit[SP.PINE][i], Math.min(1, can / cap), light) * (can > 0.06 ? 1 : 0.3);
+    const sinceFire = L.lastBurn[i] > -900 ? Math.max(0, w.yearF - L.lastBurn[i]) : 150;
+    const sinceCrew = L.lastTreat[i] > -900 ? Math.max(0, w.yearF - L.lastTreat[i]) : 150;
+    const years = Math.max(0, Math.min(sinceFire, sinceCrew) - 2);
+    L.under[i] = clamp01(0.95 * (1 - Math.exp(-UNDER_YEARLY * site * years)));
+  }
 }
 
 /**

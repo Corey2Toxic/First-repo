@@ -81,7 +81,7 @@ export const LAYER_SPECS = {
   fid: 'i32', // fire event id (-1 none)
   fpeak: 'f32', // peak flame length during the current burn, m (sets severity)
   fphase: 'u8', // 0 flaming front, 1 smouldering
-  crown: 'u8', // 1 if crowning
+  crown: 'u8', // 1 crowning now (a source of crown runs), 2 crowned earlier in this burn (v1.x: 1 if crowning)
   fline: 'f32', // fireline/containment strength 0..1
   retard: 'f32', // retardant strength 0..1
   wet: 'f32', // water-drop wetting 0..1
@@ -105,6 +105,7 @@ export const LAYER_SPECS = {
   dstress: 'f32', // multi-year drought memory (~2-year moving average of drought stress)
   // --- v2 ---
   fprog: 'f32', // fraction of the way an approaching fire front has come to this cell's centre
+  under: 'f32', // understory regeneration 0..1: saplings and pole thickets that fill in where fire stays away (ladder fuel)
 } as const satisfies Record<string, LayerType>;
 
 export type LayerName = keyof typeof LAYER_SPECS;
@@ -286,6 +287,9 @@ export interface WorldMemory {
   totalEscapes?: number;
   /** Id of the guided first season's lesson fire, once it has been lit. */
   tutorialFireId?: number;
+  /** v2: air-tanker loads flown on `dropDay` */
+  dropDay?: number;
+  dropsToday?: number;
 }
 
 export interface ReviewState {

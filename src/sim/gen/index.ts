@@ -8,7 +8,7 @@ import { generateTerrain } from './terrain.ts';
 import { conditionHydrology, computeSlopeAspectShade } from './hydro.ts';
 import { NameBank } from './names.ts';
 import { initMoisture, initSoil, initVegetation } from './vegetation.ts';
-import { initStandAge } from '../systems/vegetation.ts';
+import { initStandAge, initUnderstory } from '../systems/vegetation.ts';
 import { seedBeetles } from '../systems/beetles.ts';
 import {
   buildInitialRoads,
@@ -72,6 +72,7 @@ export function generateWorld(config: GameConfig): World {
   nameLandmarks(w, names, info);
   initWildlife(w, rng.fork('wildlife'), names);
   initStandAge(w);
+  initUnderstory(w);
   seedBeetles(w);
   initCrews(w, names);
   updateFirewise(w);

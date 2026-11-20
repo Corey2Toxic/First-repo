@@ -7,6 +7,7 @@ import { clamp01, smoothstep } from '../grid.ts';
 import { FIRE, INFRA, ZONE } from '../types.ts';
 import { COST, CREW_COST, REVENUE } from '../economyParams.ts';
 import { distanceField, millCeiling } from '../gen/settle.ts';
+import { FIREWISE_YEARS, firewiseProgress } from './towns.ts';
 import type { LedgerYear } from '../types.ts';
 import type { World } from '../world.ts';
 
@@ -81,6 +82,12 @@ export function dailyEconomy(w: World): void {
     360;
   w.spend('Upkeep', upkeep);
   if (w.policies.airPatrol && w.season <= 2) w.spend('Aviation', COST.airPatrol / 270);
+  // home hardening under the firewise code: paid per house over the years the programme runs
+  if (w.policies.buildingCode === 'firewise' && firewiseProgress(w) < 1) {
+    let homes = 0;
+    for (const t of w.towns) homes += t.structures;
+    w.spend('Home hardening', (homes * COST.firewisePerHome) / (FIREWISE_YEARS * 360));
+  }
   // grazing pressure follows the Rangeland zone at the chosen permit level
   if (w.doy % 30 === 0) updateGrazing(w);
   // summer and autumn visitors
@@ -303,6 +310,8 @@ export function timberHarvest(w: World): void {
     L.pine[i] *= 1 - frac;
     L.fir[i] *= 1 - frac * 1.05;
     if (L.fir[i] < 0) L.fir[i] = 0;
+    // logging knocks down part of the regeneration; a clearcut most of it (it comes back as a thicket)
+    L.under[i] *= clearcut ? 0.4 : 0.85;
     if (clearcut) {
       L.aspen[i] *= 0.3;
       L.hydro[i] = Math.max(L.hydro[i], 0.18);

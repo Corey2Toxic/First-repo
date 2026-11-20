@@ -12,7 +12,7 @@ import { FIRE, INFRA, SUBSTEPS_PER_DAY } from '../types.ts';
 import type { AidTeam, Crew, FireEvent, Project } from '../types.ts';
 import { COST, WORK } from '../economyParams.ts';
 import type { World } from '../world.ts';
-import { igniteProjectBurn, projectWorkCell, completeProjectCell, burnWindowOpen } from './projects.ts';
+import { burnCrewsNeeded, burnOutlook, completeProjectCell, igniteProjectBurn, projectWorkCell } from './projects.ts';
 import { cellFuel } from './fuels.ts';
 import { FLAME_LIMIT } from './fire.ts';
 import { droughtSeverity } from './climate.ts';
@@ -170,7 +170,7 @@ function localPerimeter(w: World, fe: FireEvent, x: number, y: number, r: number
         const n = i + DY8[d] * w.W + DX8[d];
         if (L.fire[n] === FIRE.BURNING && L.fid[n] === fe.id) {
           adj = true;
-          danger = Math.max(danger, L.crown[n] ? 99 : L.fint[n]);
+          danger = Math.max(danger, L.crown[n] === 1 ? 99 : L.fint[n]);
         }
       }
       if (adj) out.push({ cell: i, danger });
@@ -187,7 +187,7 @@ function nearestPerimeter(w: World, fe: FireEvent, x: number, y: number, maxDang
     if (L.fid[b] !== fe.id) continue;
     const bx = b % w.W,
       by = (b / w.W) | 0;
-    if (L.crown[b] || L.fint[b] > maxDanger) continue;
+    if (L.crown[b] === 1 || L.fint[b] > maxDanger) continue;
     for (let d = 0; d < 8; d += 2) {
       const nx = bx + DX8[d],
         ny = by + DY8[d];
@@ -482,19 +482,72 @@ function releaseFromContainedFires(w: World): void {
   }
 }
 
-/** Give idle hand crews queued projects (fires take precedence). */
+/** How many hand crews a project can usefully take. */
+export function projectCrewCap(pr: Project): number {
+  if (pr.kind === 'burn') return burnCrewsNeeded(pr);
+  return Math.max(1, Math.min(3, Math.ceil(pr.todo.length / 40)));
+}
+
+/** Why a project cannot be worked today ('' if it can): funds, snow, or a burn out of prescription. */
+export function projectBlocked(w: World, pr: Project): string {
+  if (pr.kind === 'burn') return burnOutlook(w, pr).problem;
+  if (w.economy.funds < pr.costPerCell) return 'Waiting for funds.';
+  let snowy = 0,
+    n = 0;
+  for (let k = 0; k < pr.todo.length; k += Math.max(1, Math.floor(pr.todo.length / 12))) {
+    n++;
+    if (w.L.snow[pr.todo[k]] > 20) snowy++;
+  }
+  return n > 0 && snowy > n / 2 ? 'Under snow.' : '';
+}
+
+/**
+ * Give idle hand crews treatment work (fires take precedence). v2: crews go down the list in
+ * priority order and take the first project that can actually be worked today, several crews to a
+ * large one. A project nobody can reach, or a burn outside its prescription, is passed over with a
+ * note instead of blocking everything behind it. (v1.x gave every idle crew the first queued
+ * project and stopped there: one burn whose centre lay on a beaver pond froze all treatment for the
+ * rest of a tenure in 2 of 3 audited long runs, and a crew given a burn stood on it for months
+ * waiting for weather while thinning queued behind it never started.)
+ */
 export function assignProjects(w: World): void {
-  for (const c of w.crews) {
-    if (c.state !== 'idle' || c.kind !== 'hand' || c.fatigue > 0.95 || c.aid !== undefined) continue;
-    const pr = w.projects.find((p) => (p.status === 'queued' || p.status === 'waiting') && !w.crews.some((o) => o.task?.projectId === p.id));
-    if (!pr) return;
-    const cell = projectWorkCell(w, pr, crewCell(w, c));
-    if (cell < 0) continue;
-    if (!planPath(w, c, cell)) continue;
-    c.task = { kind: 'project', projectId: pr.id };
-    c.state = 'moving';
-    c.workCell = cell;
-    if (pr.status === 'queued') pr.status = 'active';
+  const idle = w.crews.filter((c) => c.state === 'idle' && c.kind === 'hand' && c.fatigue <= 0.9 && c.aid === undefined);
+  if (idle.length === 0) return;
+  const open = w.projects.filter((p) => p.status === 'queued' || p.status === 'active' || p.status === 'waiting');
+  if (open.length === 0) return;
+  open.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0) || a.id - b.id);
+  const crewsOn = (p: Project) => w.crews.filter((o) => o.task?.projectId === p.id).length;
+  for (const pr of open) {
+    if (idle.length === 0) break;
+    const on = crewsOn(pr);
+    const problem = projectBlocked(w, pr);
+    if (problem) {
+      pr.note = problem;
+      if (on === 0 && pr.status === 'active') pr.status = pr.kind === 'burn' ? 'waiting' : 'queued';
+      continue;
+    }
+    let room = projectCrewCap(pr) - on;
+    if (room <= 0) continue;
+    // a burn is lit only with its full holding force
+    if (pr.kind === 'burn' && idle.length < room) {
+      pr.note = `Needs ${burnCrewsNeeded(pr)} free hand crews.`;
+      continue;
+    }
+    let reached = on > 0;
+    const cands = idle.slice().sort((a, b) => Math.hypot(a.x - pr.cx, a.y - pr.cy) - Math.hypot(b.x - pr.cx, b.y - pr.cy) || a.id - b.id);
+    for (const c of cands) {
+      if (room <= 0) break;
+      const cell = projectWorkCell(w, pr, crewCell(w, c));
+      if (cell < 0 || !planPath(w, c, cell)) continue;
+      c.task = { kind: 'project', projectId: pr.id };
+      c.state = 'moving';
+      c.workCell = cell;
+      idle.splice(idle.indexOf(c), 1);
+      room--;
+      reached = true;
+      if (pr.status === 'queued' || pr.status === 'waiting') pr.status = 'active';
+    }
+    pr.note = reached ? '' : 'No crew can reach this ground.';
   }
 }
 
@@ -528,9 +581,12 @@ export function crewsSubstep(w: World, hooks: CrewHooks = {}): void {
   for (const c of w.crews) {
     c.px = c.x;
     c.py = c.y;
-    // fatigue accrues while working, recovers while idle
-    if (c.state === 'working') c.fatigue = clamp01(c.fatigue + 0.03);
-    else c.fatigue = clamp01(c.fatigue - 0.05);
+    // Fatigue comes from fire duty and recovers off it. Routine treatment work is a day job: it
+    // neither tires a crew nor (v1.x) pins its fatigue at 1.0 after four days, which made the
+    // dispatcher skip exactly the crews that were out in the woods when a fire was reported.
+    const onFire = c.task?.kind === 'suppress' || c.task?.kind === 'line';
+    if (c.state === 'working' && onFire) c.fatigue = clamp01(c.fatigue + 0.03);
+    else if (c.state !== 'working' || !day) c.fatigue = clamp01(c.fatigue - 0.05);
     const t = c.task;
     if (c.state === 'idle') continue;
     if (c.state === 'returning') {
@@ -598,7 +654,9 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
     return;
   }
   if (c.kind === 'heli') return heliTick(w, c, fe, hours);
-  chargeFire(w, fe, hours, c.kind, c.aid !== undefined);
+  // hand crews are paid for the shift they work; an engine for the hours it pumps or stands guard
+  // by day (v1.x billed a parked engine overtime round the clock for weeks)
+  if (c.kind === 'hand') chargeFire(w, fe, hours, c.kind, c.aid !== undefined);
   c.hoursWorked += hours;
   if (c.kind === 'engine') {
     // direct attack on low-intensity fire within hose reach, working along the edge ("pump and
@@ -639,6 +697,7 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
     }
     c.x = ex;
     c.y = ey;
+    if (done > 0 || day) chargeFire(w, fe, hours, c.kind, c.aid !== undefined);
     // nothing in reach: drive to the road nearest the fire's edge — unless holding a threatened town
     const th = fireThreat(w, fe);
     if (done === 0 && th.dist > 6) {
@@ -747,7 +806,7 @@ function heliTick(w: World, c: Crew, fe: FireEvent, hours: number): void {
         const i = (by + dy) * w.W + bx + dx;
         L.wet[i] = Math.max(L.wet[i], 0.85);
         if (L.fire[i] === FIRE.BURNING) {
-          if (L.fint[i] < FLAME_LIMIT.engine && !L.crown[i]) extinguish(w, i);
+          if (L.fint[i] < FLAME_LIMIT.engine && L.crown[i] !== 1) extinguish(w, i);
           else L.fint[i] *= 0.6;
         }
       }
@@ -757,6 +816,11 @@ function heliTick(w: World, c: Crew, fe: FireEvent, hours: number): void {
   w.dirty.fire++;
 }
 
+/**
+ * A crew cutting a line the warden drew. v2: the crew walks the line (v1.x moved it from cell to
+ * cell for free, up any slope), each cell costs effort by fuel and slope, the night shift works at
+ * reduced output, and the crew goes back to the dispatcher's pool when the line is done.
+ */
 function lineTick(w: World, c: Crew, day: boolean): void {
   const L = w.L;
   const cells = c.task!.cells ?? [];
@@ -768,18 +832,37 @@ function lineTick(w: World, c: Crew, day: boolean): void {
     }
   }
   c.state = 'working';
-  if (!day) return;
-  let budget = WORK.lineCells[c.kind] || 4;
-  while (budget > 0 && cells.length > 0) {
-    const i = cells.shift()!;
-    if (L.water[i] >= 2 || L.fire[i] === FIRE.BURNING) continue;
+  let budget = WORK.lineCells.hand * (1 - 0.5 * c.fatigue) * (day ? 1 : 0.6);
+  let worked = false;
+  let guard = 0;
+  while (budget > 0 && cells.length > 0 && guard++ < 40) {
+    const i = cells[0];
+    if (L.water[i] >= 2 || L.fire[i] === FIRE.BURNING || L.fline[i] >= 1) {
+      cells.shift();
+      continue;
+    }
+    const here = crewCell(w, c);
+    const dx = Math.abs((i % w.W) - (here % w.W)),
+      dy = Math.abs(((i / w.W) | 0) - ((here / w.W) | 0));
+    if (dx > 1 || dy > 1) {
+      if (!planPath(w, c, i)) {
+        cells.shift(); // cannot get there: leave a gap
+        continue;
+      }
+      c.state = 'moving';
+      break;
+    }
+    budget -= lineEffort(w, i) * (1 + 3 * L.slope[i]);
     L.fline[i] = 1;
     c.x = (i % w.W) + 0.5;
     c.y = ((i / w.W) | 0) + 0.5;
-    budget--;
+    cells.shift();
+    worked = true;
   }
-  w.spend('Suppression', COST.suppressionHour * HOURS * 0.6);
-  w.dirty.fire++;
+  if (worked) {
+    w.spend('Suppression', COST.suppressionHour * HOURS);
+    w.dirty.fire++;
+  }
   if (cells.length === 0) goHome(w, c);
 }
 
@@ -799,13 +882,28 @@ function projectTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
   c.state = 'working';
   if (pr.kind === 'burn') {
     if (pr.status === 'burning') return; // holding the line (see projects.ts)
-    if (w.sub === 3 && burnWindowOpen(w, pr)) {
-      const fe = igniteProjectBurn(w, pr);
+    // 09:00: light the unit if it is in prescription and its whole holding force is on site. If it
+    // has fallen out of prescription the crews go back to other work (v1.x parked them on the unit
+    // until the weather came round: half of all crew time in a treatment-heavy game).
+    if (w.sub !== 3) return;
+    const out = burnOutlook(w, pr);
+    if (out.problem) {
+      pr.note = out.problem;
+      pr.status = 'waiting';
+      for (const o of w.crews) if (o.task?.projectId === pr.id && !o.manual) goHome(w, o);
+      return;
+    }
+    const here = w.crews.filter((o) => o.task?.projectId === pr.id && o.state === 'working').length;
+    if (here >= burnCrewsNeeded(pr)) {
+      const fe = igniteProjectBurn(w, pr, here);
       if (fe && hooks.onBurnIgnited) hooks.onBurnIgnited(pr, fe);
-    } else pr.status = 'waiting';
+    }
     return;
   }
-  if (!day) return;
+  if (!day) {
+    c.state = 'resting';
+    return;
+  }
   if (w.economy.funds < pr.costPerCell) {
     pr.status = 'waiting';
     return;
@@ -815,6 +913,8 @@ function projectTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
   let budget = rate * (1 - 0.4 * c.fatigue);
   let guard = 0;
   while (budget > 0 && guard++ < 10) {
+    // (another crew on the same project may have finished this crew's cell)
+    if (c.workCell >= 0 && !pr.todo.includes(c.workCell)) c.workCell = -1;
     const cell = c.workCell >= 0 ? c.workCell : projectWorkCell(w, pr, crewCell(w, c));
     if (cell < 0) {
       pr.status = 'done';

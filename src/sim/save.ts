@@ -10,7 +10,7 @@ import { Rng } from './rng.ts';
 import { LAYER_SPECS, World } from './world.ts';
 import { releaseOrphanFireCells } from './systems/fire.ts';
 import { POLICY_VALUES } from './commands.ts';
-import { initStandAge } from './systems/vegetation.ts';
+import { initStandAge, initUnderstory } from './systems/vegetation.ts';
 import { seedBeetles } from './systems/beetles.ts';
 import type { LayerName, LayerType } from './world.ts';
 
@@ -154,6 +154,8 @@ export function decodeWorld(bytes: Uint8Array): World {
     initStandAge(w);
     seedBeetles(w); // and no endemic beetle population
   }
+  // saves from before v2 have no understory layer: reconstruct it from each cell's fire and treatment history
+  if (!header.layers.some((l) => l.name === 'under')) initUnderstory(w);
   // v1.0 saves can hold burned houses that were never released (fireproof forever): repair them
   releaseOrphanFireCells(w);
   // v1.0 did not count homes buried by debris flows in the valley total; every lost home is in
