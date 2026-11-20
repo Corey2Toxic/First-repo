@@ -420,49 +420,59 @@ export function autoDispatch(w: World): void {
   const scoreOf = new Map<number, (typeof scored)[number]>();
   for (const sc of scored) scoreOf.set(sc.fe.id, sc);
   const tried = new Set<Crew>();
-  // fires in priority order; each gets the nearest free crews of each kind
-  for (const { fe, th, e, score } of scored) {
-    const cx = (fe.minX + fe.maxX) / 2,
-      cy = (fe.minY + fe.maxY) / 2;
-    for (const kind of ['hand', 'engine', 'heli'] as const) {
-      if (kind === 'engine' && th.dist > 16 && !fe.inBuffer && roadGap(w, fe) > 6) continue; // engines defend homes and roadsides
-      const want = crewsWanted(fe, kind, e.open, th.dist);
-      let have = assigned(fe, kind);
-      while (have < want) {
-        let best: Crew | null = null,
-          bd = Infinity;
-        for (const c of w.crews) {
-          if (c.kind !== kind || tried.has(c) || !isFree(c) || !mayWork(c, fe)) continue;
-          const d = Math.hypot(c.x - cx, c.y - cy);
-          if (d < bd) {
-            bd = d;
-            best = c;
+  // Two passes over the fires in priority order: first every fire gets a working minimum (two hand
+  // crews, an engine, a helicopter), then the rest of the roster goes where the open edge is.
+  // (One pass gave the most urgent fire everything it wanted before the next was looked at: with
+  // several large fires at once, some burned for a week with no crew while a dozen worked another.)
+  const minimum = (kind: Crew['kind'], want: number) => Math.min(want, kind === 'hand' ? 2 : 1);
+  for (const pass of [0, 1]) {
+    for (const { fe, th, e, score } of scored) {
+      const cx = (fe.minX + fe.maxX) / 2,
+        cy = (fe.minY + fe.maxY) / 2;
+      for (const kind of ['hand', 'engine', 'heli'] as const) {
+        if (kind === 'engine' && th.dist > 16 && !fe.inBuffer && roadGap(w, fe) > 6) continue; // engines defend homes and roadsides
+        const want = crewsWanted(fe, kind, e.open, th.dist);
+        const target = pass === 0 ? minimum(kind, want) : want;
+        let have = assigned(fe, kind);
+        while (have < target) {
+          let best: Crew | null = null,
+            bd = Infinity;
+          for (const c of w.crews) {
+            if (c.kind !== kind || tried.has(c) || !isFree(c) || !mayWork(c, fe)) continue;
+            const d = Math.hypot(c.x - cx, c.y - cy);
+            if (d < bd) {
+              bd = d;
+              best = c;
+            }
           }
+          if (!best) break;
+          tried.add(best);
+          if (assignToFire(w, best, fe)) have++;
         }
-        if (!best) break;
-        tried.add(best);
-        if (assignToFire(w, best, fe)) have++;
-      }
-      // still short of a working minimum: take crews off a fire that is lined, or far less urgent
-      const floor = Math.min(want, kind === 'hand' ? 2 : 1);
-      while (have < floor) {
-        let best: Crew | null = null,
-          bd = Infinity;
-        for (const c of w.crews) {
-          if (c.kind !== kind || c.manual || tried.has(c) || c.aid !== undefined || c.task?.kind !== 'suppress' || c.task.fireId === fe.id) continue;
-          const other = scoreOf.get(c.task.fireId!);
-          if (!other) continue;
-          const lined = other.e.open === 0;
-          if (!lined && other.score > score * 0.5) continue;
-          const d = Math.hypot(c.x - cx, c.y - cy);
-          if (d < bd) {
-            bd = d;
-            best = c;
+        if (pass === 0) continue;
+        // still short of a working minimum: take crews off a fire that is lined, or far less urgent,
+        // or that has more than its own minimum while this one has nobody
+        const floor = minimum(kind, want);
+        while (have < floor) {
+          let best: Crew | null = null,
+            bd = Infinity;
+          for (const c of w.crews) {
+            if (c.kind !== kind || c.manual || tried.has(c) || c.aid !== undefined || c.task?.kind !== 'suppress' || c.task.fireId === fe.id) continue;
+            const other = scoreOf.get(c.task.fireId!);
+            if (!other) continue;
+            const lined = other.e.open === 0;
+            const spare = have === 0 && assigned(other.fe, kind) > minimum(kind, crewsWanted(other.fe, kind, other.e.open, other.th.dist));
+            if (!lined && !spare && other.score > score * 0.5) continue;
+            const d = Math.hypot(c.x - cx, c.y - cy);
+            if (d < bd) {
+              bd = d;
+              best = c;
+            }
           }
+          if (!best) break;
+          tried.add(best);
+          if (assignToFire(w, best, fe)) have++;
         }
-        if (!best) break;
-        tried.add(best);
-        if (assignToFire(w, best, fe)) have++;
       }
     }
   }

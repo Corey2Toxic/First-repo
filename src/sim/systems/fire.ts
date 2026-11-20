@@ -650,7 +650,13 @@ export function cellTerms(env: SpreadEnv, w: World, n: number, t: CellTerms, cro
   const fmDead = env.fm !== undefined ? env.fm : L.fm[n] + env.fmAdd;
   // what slows fire entering this cell whichever way it comes: retardant, wetting, a road, a fuel
   // break, a stream; a river and its green banks all but stop surface fire and check a crown fire
-  const k = (1 - 0.9 * L.retard[n]) * (1 - L.wet[n]) * (L.infra[n] & INFRA.ROAD ? 0.5 : 1) * (L.infra[n] & INFRA.FUELBREAK ? 0.35 : 1);
+  // Ground that has just burned has given up the fuel that carries fire; needle cast and new growth
+  // bring it back over the following year. A burn scar is a barrier while it is fresh. (Without this
+  // the litter a light fire leaves behind carried the next fire at full rate a week later, and
+  // verification runs counted more than the whole valley burned in one year.)
+  const since = w.yearF - L.lastBurn[n];
+  const scar = since >= 0 && since < 1 ? smoothstep(0.25, 1, since) : 1;
+  const k = (1 - 0.9 * L.retard[n]) * (1 - L.wet[n]) * (L.infra[n] & INFRA.ROAD ? 0.5 : 1) * (L.infra[n] & INFRA.FUELBREAK ? 0.35 : 1) * scar;
   const acc = L.flowAcc[n];
   const kS = acc > 1000 ? k * 0.05 : acc > 300 ? k * 0.6 : k;
   const kC = acc > 1000 ? k * 0.4 : acc > 300 ? k * 0.6 : k;

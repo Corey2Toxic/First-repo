@@ -198,6 +198,27 @@ describe('dispatch', () => {
     expect(w.crews.filter((c) => c.task?.fireId === fe.id).length).toBe(6);
   });
 
+  it('with two fires and not enough crews, each gets a working minimum before either gets more', () => {
+    const w = standWithCrews(4);
+    w.sub = 4;
+    // a large fire with a long open edge near the station, and a new start at the far end of the stand
+    const large = startFire(w, 25 * w.W + 20, 'lightning')!;
+    large.detected = true;
+    for (let x = 21; x < 60; x++) igniteCell(w, 25 * w.W + x, large, 0.5, false);
+    const small = startFire(w, 8 * w.W + 70, 'lightning')!;
+    small.detected = true;
+    expect(openEdges(w).get(large.id)!.open).toBeGreaterThan(30);
+    autoDispatch(w);
+    const on = (id: number) => w.crews.filter((c) => c.task?.fireId === id).length;
+    // (one pass in priority order gave all four to the large fire and left the new start alone)
+    expect(on(small.id)).toBe(2);
+    expect(on(large.id)).toBe(2);
+    // and a crew that arrives later goes where the open edge is
+    w.crews.push(makeCrew(w, 'hand', 25 * w.W + 2, 'Late crew'));
+    autoDispatch(w);
+    expect(on(large.id)).toBe(3);
+  });
+
   it('every engine within reach protects houses, standing by or working (1.1.1: the best one, and only if sent)', () => {
     const w = standWithCrews(0);
     const house = 25 * w.W + 10;

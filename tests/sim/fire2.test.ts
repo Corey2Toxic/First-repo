@@ -478,3 +478,35 @@ describe('fire core v2: houses', () => {
     expect(blockLoss(12, 1, 'h2h-fw')).toBeLessThan(0.5 * gale);
   });
 });
+
+describe('fire core v2: burn scars', () => {
+  it('a fresh burn does not carry fire; a year later it does (before: the litter a light fire left carried the next one within days)', () => {
+    /** Does fire lit west of a strip burned `yearsAgo` reach the far side of it in a long windy afternoon? */
+    const crosses = (yearsAgo: number): number => {
+      let n = 0;
+      for (let k = 0; k < 4; k++) {
+        const w = flatWorld(90, 31, { ...PINE, fm: 0.06 });
+        w.rng.fire = new Rng(`scar-${yearsAgo}-${k}`);
+        w.weather.windSpeed = 8;
+        // the strip burned lightly: its litter is what such a fire leaves, enough by itself to carry
+        for (let y = 0; y < w.H; y++)
+          for (let x = 30; x < 38; x++) {
+            const i = y * w.W + x;
+            w.L.lastBurn[i] = w.yearF - yearsAgo;
+            w.L.litter[i] = 3.5;
+          }
+        established(startFire(w, 15 * w.W + 22, 'lightning'));
+        for (let s = 0; s < 40 && w.burning.length; s++) {
+          w.sub = 4;
+          fireSubstep(w);
+        }
+        let past = false;
+        for (let i = 0; i < w.N; i++) if (i % w.W >= 40 && w.L.lastBurn[i] >= w.yearF - 0.01) past = true;
+        if (past) n++;
+      }
+      return n;
+    };
+    expect(crosses(0.05)).toBe(0);
+    expect(crosses(1.5)).toBe(4);
+  });
+});

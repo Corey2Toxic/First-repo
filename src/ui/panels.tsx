@@ -234,7 +234,7 @@ const POLICIES: PolicyDef[] = [
   { key: 'hunting', name: 'Deer hunting', options: [['none', 'None'], ['moderate', 'Moderate'], ['heavy', 'Heavy']], desc: 'Autumn hunts bring license fees and fewer deer.' },
   { key: 'airPatrol', name: 'Air patrol', options: [[false, 'Off'], [true, 'On ($55k/yr)']], desc: 'Spotter flights find remote fires while they are small.' },
   { key: 'smokeRules', name: 'Smoke rules', options: [[false, 'Off'], [true, 'On']], desc: 'Burns only on days with good smoke dispersal. Fewer burn windows; less smoke.' },
-  { key: 'mutualAid', name: 'Outside incident teams', options: [['auto', 'Standing order'], ['manual', 'Only when I call']], desc: 'With a standing order a team is called as soon as an escaped fire of 150 ha threatens a town, if there is a week of its bills in hand ($25k to mobilise, $20k a day). Otherwise you call from the fire’s own panel.' },
+  { key: 'mutualAid', name: 'Outside incident teams', options: [['auto', 'Standing order'], ['manual', 'Only when I call']], desc: 'With a standing order a team is called as soon as an escaped fire of 150 ha threatens a town, and a second for a fire past 2,000 ha ($25k to mobilise, $20k a day each), unless the service has nothing in hand. Otherwise you call from the fire’s own card. Fire costs can take the service $200k into debt; past that the state carries them.' },
 ];
 
 function PoliciesPanel({ s }: { s: GameSession }) {

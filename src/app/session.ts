@@ -295,7 +295,8 @@ export class GameSession {
   getFireshed(): Fireshed {
     const w = this.world;
     const c = w.counters;
-    const key = `${w.year}:${Math.floor(w.doy / 30)}:${c.yearTreated}:${c.yearRxBurned}:${c.yearBurned}:${w.towns.map((t) => t.structures + ':' + Math.round(t.firewise * 50)).join(',')}`;
+    // (burned area in steps of 200 ha: a fire in progress must not recompute the firesheds every few seconds)
+    const key = `${w.year}:${Math.floor(w.doy / 30)}:${Math.floor(c.yearTreated / 20)}:${Math.floor(c.yearRxBurned / 50)}:${Math.floor(c.yearBurned / 200)}:${w.towns.map((t) => t.structures + ':' + Math.round(t.firewise * 50)).join(',')}`;
     if (!this.shed || this.shedKey !== key) {
       this.shed = computeFireshed(w);
       this.shedKey = key;

@@ -73,8 +73,14 @@ which are unchanged from v1.1.
 
 * **Initiation** (Van Wagner 1977): the stand torches when surface intensity exceeds
   `(0.01 · CBH · (460 + 25.9 · FMC))^1.5`. Canopy base height follows ladder fuel,
-  `CBH = 0.5 + 9 · (1 − ladder)³` m (9 m in open old pine, half a metre in a thicket); foliar
-  moisture falls with drought and collapses in beetle-killed crowns.
+  `CBH = 1.5 + 8 · (1 − ladder)³` m (9.5 m in open old pine, a metre and a half in a thicket;
+  published values for untreated mixed conifer run 1–3 m); foliar moisture falls with drought and
+  collapses in beetle-killed crowns.
+  (Until late in development the floor was 0.5 m, where the threshold is a 50 cm flame: 81–88 % of
+  a Tinderbox valley's woods torched in a 3 m/s wind at 10 % fuel moisture, and about half of a
+  First Season valley's. No edge of an escaped fire could be worked in any weather, and on eight
+  verification seeds five passive Tinderbox tenures had a year in which over 40 % of the valley
+  burned. See `V2_REPORT.md`.)
 * **Active crown runs** need Van Wagner's second criterion: the crown rate must reach
   `3 / CBD` m/min. With the canopy at full fuel taken as 0.2 kg/m³ this is 9 / canopy cells per hour;
   a run ramps in between 60 % and 100 % of it. Open stands torch tree by tree but do not run.
@@ -94,9 +100,9 @@ New state variable `under` (0–1): saplings and pole thickets beneath or betwee
 * Low-severity fire removes three quarters of it, moderate fire nearly all; thinning removes 90 %.
   It is back in 10–15 years unless fire returns.
 
-This is the mechanism of the fire paradox that 1.x lacked. In a generated Tinderbox valley 75 % of
-wooded land torches at a 6 m/s wind on a dry afternoon (16 % in First Season); in 1.1.1, 0 %.
-(`fuels.ts`)
+This is the mechanism of the fire paradox that 1.x lacked. On a dry afternoon in a generated
+Tinderbox valley 51 % of wooded land torches at a 6 m/s wind and 75 % at 12 m/s; in a First Season
+valley 0 % and 18 %; in 1.1.1, nothing at any wind. (`fuels.ts <scenario> cal-a 0`)
 
 ### 2.5 Day and night; fires that last
 
@@ -140,12 +146,17 @@ Twelve-home town, a fire front 1.2 km upwind, westerly design day, mean of 12 ru
 
 | Ground around the town | Homes lost (simulation) | Fireshed's estimate |
 |---|---|---|
-| Untreated thicket | 11.1 | 11.2 |
-| Untreated thicket, firewise 0.9 | 6.5 | 6.8 |
-| Thinned and underburned within 400 m | 3.2 | 2.4 |
-| Treated and firewise | 1.0 | 0.8 |
-| Open pine litter | 2.1 | 2.5 |
-| Cured grass | 5.8 | 7.9 |
+| Untreated thicket | 8.3 | 7.5 |
+| Untreated thicket, firewise 0.9 | 3.7 | 3.2 |
+| Thinned and underburned within 400 m | 2.4 | 2.4 |
+| Treated and firewise | 1.2 | 0.8 |
+| Open pine litter | 1.8 | 2.4 |
+| Cured grass | 3.7 | 4.9 |
+
+(With the first, linear ignition rule the first and third rows were 11.9 and 11.0: treatment did
+not save homes. The fireshed's estimate assumes a house meets the head of the fire on about an
+eighth of its sides and slower, lower fire on the rest, with timber beside it burning for several
+steps; those constants are fitted to these six cases and to nothing else.)
 
 ### 2.8 Barriers and tools
 

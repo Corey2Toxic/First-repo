@@ -186,6 +186,7 @@ describe('fire behaviour', () => {
             const i = y * w.W + x;
             w.L.grass[i] = 0.9;
             w.L.litter[i] = 6;
+            w.L.lastBurn[i] = -999; // years on: the strip has grown back (a fresh scar would not carry fire)
           }
         startFire(w, 10 * w.W + 18, 'human');
         for (let s = 0; s < 300 && w.burning.length; s++) {
