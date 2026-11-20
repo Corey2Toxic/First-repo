@@ -21,7 +21,7 @@ export function TitleScreen(props: { onNew: () => void; onContinue: (slot: strin
       <div class="vignette" />
       <div class="title-wrap" style={{ position: 'relative' }}>
         <div class="logo">FIREWEED</div>
-        <div class="subtitle">A century of fire, forest, wildlife — and the people in between.</div>
+        <div class="subtitle">You cannot stop fire. You can only choose it.</div>
         <div style={{ fontSize: '12px', marginTop: '8px', letterSpacing: '0.12em', color: '#e8dcc0', opacity: 0.75, textShadow: '0 2px 8px rgba(0, 0, 0, 0.8)' }}>
           VERSION {GAME_VERSION}
         </div>
@@ -52,7 +52,7 @@ export function TitleScreen(props: { onNew: () => void; onContinue: (slot: strin
         </div>
         <div class="faint" style={{ fontSize: '12px', marginTop: '22px', maxWidth: '520px', textShadow: '0 1px 4px #000' }}>
           Every forest, fire, herd and ember you will see is simulated: weather, fuels, succession, wildlife, water and politics interacting on a 24 × 17 km
-          valley. No two valleys are the same.
+          valley. Fires last days, the forecast is real, and the ground you prepare is what the next fire meets. No two valleys are the same.
         </div>
       </div>
     </div>
@@ -75,7 +75,9 @@ export function AboutScreen({ onBack }: { onBack: () => void }) {
             <ul class="dim" style={{ paddingLeft: '18px' }}>
               <li>Terrain grown by uplift and river erosion; snow, soil moisture and fuel moisture every day.</li>
               <li>Five plant types competing for light and water, aging, dying, seeding, resprouting.</li>
-              <li>Fire spread from fuels, moisture, wind and slope; crowning, ember spotting, smouldering overnight.</li>
+              <li>Fire spread from fuels, moisture, wind and slope, with flame lengths in metres: what crews can face, what torches, what takes a house.</li>
+              <li>Fires that lie down at night and run for days; a five-day forecast drawn from the weather that will actually come.</li>
+              <li>Where each fire is expected to spread, and for every town the ground a bad day’s fire would come from.</li>
               <li>Deer herds, wolf packs and beaver colonies — and the cascade between them.</li>
               <li>Bark beetles, erosion, debris flows, a reservoir that silts up.</li>
               <li>Towns, a sawmill, ranches, tourism, five political constituencies and an annual council.</li>
@@ -143,6 +145,16 @@ export function NewGameScreen(props: { onBack: () => void; onStart: (scenario: S
           <p class="dim" style={{ margin: 0 }}>
             {s.description}
           </p>
+          <div style={{ marginTop: '8px' }}>
+            <div class="faint" style={{ fontSize: '11px', letterSpacing: '0.07em' }}>
+              THE COUNCIL’S CHARGE
+            </div>
+            <ol class="dim" style={{ margin: '3px 0 0', paddingLeft: '18px', fontSize: '12.5px' }}>
+              {s.charge.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ol>
+          </div>
           <div class="row" style={{ flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
             <span class="tag">{s.config.tenureYears}-year tenure</span>
             <span class="tag">start {money(s.config.startFunds)}</span>
@@ -156,7 +168,7 @@ export function NewGameScreen(props: { onBack: () => void; onStart: (scenario: S
           <div class="grid3" style={{ marginTop: '12px' }}>
             {num('climateTrend', 'Warming', 0, 0.8, 0.05, (v) => `${v.toFixed(2)}°C/decade`)}
             {num('dryness', 'Precipitation', 0.7, 1.3, 0.05, (v) => `${Math.round(v * 100)}%`)}
-            {num('tenureYears', 'Tenure', 15, 80, 5, (v) => `${v} years`)}
+            {num('tenureYears', 'Tenure', 10, 60, 5, (v) => `${v} years`)}
             {num('wolves', 'Wolf packs', 0, 4, 1, (v) => `${v}`)}
             {num('beavers', 'Beaver colonies', 0, 8, 1, (v) => `${v}`)}
             {num('herds', 'Deer herds', 6, 50, 2, (v) => `${v}`)}

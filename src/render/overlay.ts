@@ -36,6 +36,8 @@ export interface OverlayState {
   dayAlpha: number; // 0..1 progress through the current day
   time: number;
   towerRadius: boolean;
+  /** where fire is expected to spread, one pixel per cell (drawn under everything else) */
+  projection?: CanvasImageSource | null;
 }
 
 interface Rect {
@@ -103,6 +105,14 @@ export class OverlayRenderer {
     const s = cam.scale;
     const P = (wx: number, wy: number) => cam.worldToScreen(wx, wy);
     const vis = (x: number, y: number, m = 40) => x > -m && y > -m && x < cam.viewW + m && y < cam.viewH + m;
+
+    // --- where fire is expected to go (session.paintProjection)
+    if (st.projection) {
+      const [px, py] = P(0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(st.projection, px, py, w.W * s, w.H * s);
+      ctx.imageSmoothingEnabled = true;
+    }
 
     // --- project outlines
     for (const pr of w.projects) {

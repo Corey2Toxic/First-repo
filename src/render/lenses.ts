@@ -5,8 +5,9 @@
 import { clamp01, smoothstep } from '../sim/grid.ts';
 import { hazardIndex } from '../sim/systems/fuels.ts';
 import type { World } from '../sim/world.ts';
+import type { Fireshed } from '../sim/projection.ts';
 
-export type LensId = 'none' | 'hazard' | 'veg' | 'age' | 'moisture' | 'wildlife' | 'zones' | 'history' | 'beetles' | 'water';
+export type LensId = 'none' | 'hazard' | 'behaviour' | 'fireshed' | 'veg' | 'age' | 'moisture' | 'wildlife' | 'zones' | 'history' | 'beetles' | 'water';
 
 export interface LensInfo {
   id: LensId;
@@ -15,6 +16,8 @@ export interface LensInfo {
   description: string;
   legend: Array<[string, string]>; // [css colour, label]
   dynamic: boolean; // changes day to day
+  /** needs the towns' firesheds (projection.ts computeFireshed) */
+  fireshed?: boolean;
 }
 
 export const LENSES: LensInfo[] = [
@@ -31,6 +34,63 @@ export const LENSES: LensInfo[] = [
       ['#a01d2a', 'Extreme'],
     ],
     dynamic: true,
+  },
+  {
+    id: 'behaviour',
+    name: 'Bad-day fire',
+    key: '0',
+    description: 'What fire would do in each stand on a bad day (late summer, drought, a strong dry wind), by what could be done about it. Thinning and burning move ground down this scale.',
+    legend: [
+      ['#4f9a5d', 'Hand crews can work it (flames under 1.2 m)'],
+      ['#d9c64c', 'Engines only (under 2.4 m)'],
+      ['#e58a2e', 'Aircraft only (longer flames)'],
+      ['#a01d2a', 'Torching and crown fire'],
+    ],
+    dynamic: false,
+    fireshed: true,
+  },
+  {
+    id: 'fireshed',
+    name: 'Fireshed',
+    key: '-',
+    description: 'How long a fire starting here on a bad day would need to reach homes. The ground that threatens the towns, and where work protects them.',
+    legend: [
+      ['#8e1b2c', 'Under 3 hours'],
+      ['#d1492e', '3–6 hours'],
+      ['#e8922e', '6–12 hours (one burning period)'],
+      ['#e8cf5a', '12–24 hours'],
+      ['#b9c7a0', '1–1.5 days'],
+    ],
+    dynamic: false,
+    fireshed: true,
+  },
+  {
+    id: 'moisture',
+    name: 'Fuel moisture',
+    key: '4',
+    description: 'Dead fine-fuel moisture today. Below ~8% fires run; above ~20% they barely creep.',
+    legend: [
+      ['#b3261e', '< 6%'],
+      ['#e58f3c', '8%'],
+      ['#e8d679', '12%'],
+      ['#7ab4c9', '18%'],
+      ['#2f5f9a', '> 25%'],
+    ],
+    dynamic: true,
+  },
+  {
+    id: 'history',
+    name: 'Fire history',
+    key: '7',
+    description: 'Years since each hectare last burned, and how severely. Long-unburned dry forest is a warning.',
+    legend: [
+      ['#ff4fa3', '< 3 years'],
+      ['#e9a0d8', '3–15 years'],
+      ['#b4a8d8', '15–50 years'],
+      ['#6f6a8a', '50–100 years'],
+      ['#3b2b2b', '100+ / never'],
+    ],
+    dynamic: false,
   },
   {
     id: 'veg',
@@ -60,20 +120,6 @@ export const LENSES: LensInfo[] = [
     dynamic: false,
   },
   {
-    id: 'moisture',
-    name: 'Fuel moisture',
-    key: '4',
-    description: 'Dead fine-fuel moisture today. Below ~8% fires run; above ~20% they barely creep.',
-    legend: [
-      ['#b3261e', '< 6%'],
-      ['#e58f3c', '8%'],
-      ['#e8d679', '12%'],
-      ['#7ab4c9', '18%'],
-      ['#2f5f9a', '> 25%'],
-    ],
-    dynamic: true,
-  },
-  {
     id: 'wildlife',
     name: 'Wildlife',
     key: '5',
@@ -96,20 +142,6 @@ export const LENSES: LensInfo[] = [
       ['#f2a640', 'Timber'],
       ['#ebe066', 'Rangeland'],
       ['#f26666', 'Community buffer'],
-    ],
-    dynamic: false,
-  },
-  {
-    id: 'history',
-    name: 'Fire history',
-    key: '7',
-    description: 'Years since each hectare last burned, and how severely. Long-unburned dry forest is a warning.',
-    legend: [
-      ['#ff4fa3', '< 3 years'],
-      ['#e9a0d8', '3–15 years'],
-      ['#b4a8d8', '15–50 years'],
-      ['#6f6a8a', '50–100 years'],
-      ['#3b2b2b', '100+ / never'],
     ],
     dynamic: false,
   },
@@ -173,11 +205,50 @@ const FM: Array<[number, string]> = [
   [0.26, '#2f5f9a'],
 ];
 
-/** Fill `out` (RGBA, w.N*4) for the lens. */
-export function computeLens(w: World, lens: LensId, out: Uint8Array): void {
+const BEHAVIOUR = ['#000000', '#4f9a5d', '#d9c64c', '#e58a2e', '#a01d2a'].map(hex);
+const SHED: Array<[number, [number, number, number]]> = [
+  [3, hex('#8e1b2c')],
+  [6, hex('#d1492e')],
+  [12, hex('#e8922e')],
+  [24, hex('#e8cf5a')],
+  [36, hex('#b9c7a0')],
+];
+
+/** Fill `out` (RGBA, w.N*4) for the lens. `shed`: the towns' firesheds, for the lenses that show them. */
+export function computeLens(w: World, lens: LensId, out: Uint8Array, shed?: Fireshed): void {
   const L = w.L;
   out.fill(0);
   if (lens === 'none' || lens === 'zones') return;
+  if (lens === 'behaviour' || lens === 'fireshed') {
+    if (!shed) return;
+    for (let i = 0; i < w.N; i++) {
+      if (L.water[i] >= 2 || L.town[i] !== 0) continue;
+      const o = i * 4;
+      if (lens === 'behaviour') {
+        const b = shed.behaviour[i];
+        if (!b) continue;
+        const c = BEHAVIOUR[b];
+        out[o] = c[0];
+        out[o + 1] = c[1];
+        out[o + 2] = c[2];
+        out[o + 3] = 190;
+      } else {
+        const h = shed.hours[i];
+        if (!(h <= 36)) continue;
+        let c = SHED[SHED.length - 1][1];
+        for (const [lim, col] of SHED)
+          if (h <= lim) {
+            c = col;
+            break;
+          }
+        out[o] = c[0];
+        out[o + 1] = c[1];
+        out[o + 2] = c[2];
+        out[o + 3] = h <= 12 ? 205 : 170;
+      }
+    }
+    return;
+  }
   const vegCols = ['#c8b46a', '#8a8d45', '#a6d65c', '#3f7a44', '#1f4f47'].map(hex);
   for (let i = 0; i < w.N; i++) {
     const o = i * 4;

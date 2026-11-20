@@ -22,6 +22,10 @@ import { saveToSlot } from './storage.ts';
 import { Advisor } from './advisor.ts';
 import { FrameClock } from './frameClock.ts';
 import { AudioEngine } from '../audio/audio.ts';
+import { computeFireshed, projectSpread } from '../sim/projection.ts';
+import type { Fireshed, SpreadProjection } from '../sim/projection.ts';
+import { forecast } from '../sim/forecast.ts';
+import type { DayForecast } from '../sim/forecast.ts';
 
 export type ToolId =
   | 'inspect'
@@ -47,8 +51,12 @@ export interface ToolState {
   sendCrewId: number;
 }
 
-export const SPEEDS = [0, 3, 12, 48, 220]; // ticks (3 h) per real second
-export const SPEED_NAMES = ['Paused', 'Watch', 'Normal', 'Fast', 'Fastest'];
+/**
+ * Ticks (3 h) per real second. v2: fires last days and ask for decisions, so the slow end is slower
+ * (Watch: a day in four seconds; v1.x: 3, 12, 48, 220) and the fast end is what it was.
+ */
+export const SPEEDS = [0, 2, 8, 40, 220];
+export const SPEED_NAMES = ['Paused', 'Watch (6 h/s)', 'Day by day (1 day/s)', 'Fast (5 days/s)', 'Fastest (a month in a second)'];
 
 export interface Toast {
   id: number;
@@ -59,6 +67,10 @@ export interface Toast {
 
 export interface Settings {
   autoSlow: boolean;
+  /** pause for what needs a decision: an escaped fire, a town in a fire's path, a fire-weather watch with fire on the ground */
+  autoPause: boolean;
+  /** draw where reported fires are expected to spread */
+  projection: boolean;
   labels: boolean;
   contours: boolean;
   wildlife: boolean;
@@ -99,7 +111,22 @@ export class GameSession {
   path: number[] = [];
   pathLabel = '';
   private roadStart = -1;
-  settings: Settings = { autoSlow: true, labels: true, contours: false, wildlife: true, audio: false, reveal: false, sharp: false };
+  settings: Settings = { autoSlow: true, autoPause: true, projection: true, labels: true, contours: false, wildlife: true, audio: false, reveal: false, sharp: false };
+  /** Where fire is expected to spread: the selected fire, or every reported fire (refreshed as the clock moves). */
+  projection: SpreadProjection | null = null;
+  /** the fire the projection is for (-1: all reported fires) */
+  projectionFire = -1;
+  private projKey = '';
+  private projAt = 0;
+  private projImage: HTMLCanvasElement | null = null;
+  /** The towns' firesheds on the design day (computed when a lens or a panel asks for it). */
+  private shed: Fireshed | null = null;
+  private shedKey = '';
+  private fc: { day: number; list: DayForecast[] } | null = null;
+  /** highest notification id already acted on (slow-downs and pauses) */
+  private lastNote = 0;
+  /** running fast until the next thing worth stopping for */
+  skipping = false;
   toasts: Toast[] = [];
   private listeners = new Set<() => void>();
   private raf = 0;
@@ -108,7 +135,6 @@ export class GameSession {
   private lastUi = 0;
   private lastLens = 0;
   private lensBuf: Uint8Array;
-  private detectedCount = 0;
   private dragging: { button: number; x: number; y: number; moved: boolean; painting: boolean } | null = null;
   /** Pointers currently down on the map (two fingers = pinch zoom). */
   private pointers = new Map<number, { x: number; y: number }>();
@@ -140,7 +166,7 @@ export class GameSession {
       this.renderer.overlayData = this.lensBuf;
       this.advisor = new Advisor(this);
       this.audio = new AudioEngine();
-      this.detectedCount = world.fires.filter((f) => f.active && f.detected).length;
+      this.lastNote = world.notifications.length ? world.notifications[world.notifications.length - 1].id : 0;
       this.resize();
       this.cam.fit();
       this.bindInput();
@@ -217,6 +243,7 @@ export class GameSession {
   setSpeed(s: number): void {
     if (s > 0) this.prevSpeed = s;
     this.speed = s;
+    this.skipping = false;
     this.clock.capBacklog(SPEEDS[s] ?? 0);
     this.audio.resume();
     this.emit();
@@ -224,6 +251,112 @@ export class GameSession {
 
   togglePause(): void {
     this.setSpeed(this.speed === 0 ? this.prevSpeed || 2 : 0);
+  }
+
+  /** Run fast until something asks for attention (a fire, a watch, a briefing, the turn of the season). */
+  advanceToEvent(): void {
+    if (this.sim.blocked) return;
+    this.speed = 4;
+    this.skipping = true;
+    this.clock.capBacklog(SPEEDS[4]);
+    this.audio.resume();
+    this.emit();
+  }
+
+  /** The published forecast for the coming days (one computation per game day). */
+  getForecast(): DayForecast[] {
+    const w = this.world;
+    if (!this.fc || this.fc.day !== w.day) this.fc = { day: w.day, list: forecast(w) };
+    return this.fc.list;
+  }
+
+  /** The towns' firesheds, recomputed when treatments, fire or the turn of a month have changed the ground. */
+  getFireshed(): Fireshed {
+    const w = this.world;
+    const c = w.counters;
+    const key = `${w.year}:${Math.floor(w.doy / 30)}:${c.yearTreated}:${c.yearRxBurned}:${c.yearBurned}:${w.towns.map((t) => t.structures + ':' + Math.round(t.firewise * 50)).join(',')}`;
+    if (!this.shed || this.shedKey !== key) {
+      this.shed = computeFireshed(w);
+      this.shedKey = key;
+    }
+    return this.shed;
+  }
+
+  /** Which fire the projection should be for: the selected one, else every reported wildfire (-1), else none (-2). */
+  private projectionTarget(): number {
+    const w = this.world;
+    if (this.selection?.type === 'fire') {
+      const id = this.selection.id;
+      const fe = w.fires.find((f) => f.id === id);
+      if (fe && fe.active && (fe.detected || this.settings.reveal)) return fe.id;
+    }
+    if (!this.settings.projection) return -2;
+    return w.fires.some((f) => f.active && f.detected && f.cause !== 'prescribed') ? -1 : -2;
+  }
+
+  private refreshProjection(now: number): void {
+    const w = this.world;
+    const target = this.projectionTarget();
+    if (target === -2) {
+      if (this.projection) {
+        this.projection = null;
+        this.projImage = null;
+        this.projKey = '';
+      }
+      return;
+    }
+    const key = `${target}:${w.day}:${w.sub}:${w.burning.length}`;
+    if (key === this.projKey) return;
+    // at speed the clock outruns the projection: draw at most a few a second
+    if (this.projection && now - this.projAt < (this.speed >= 3 ? 900 : 300)) return;
+    this.projKey = key;
+    this.projAt = now;
+    this.projectionFire = target;
+    const pr = projectSpread(w, target >= 0 ? { fireId: target, hours: 48, includeUnreported: this.settings.reveal } : { hours: 48 });
+    this.projection = pr;
+    this.projImage = this.paintProjection(pr);
+  }
+
+  /** The projection as a picture, one pixel per hectare: where the fire is expected within 6, 12, 24 and 48 hours. */
+  private paintProjection(pr: SpreadProjection): HTMLCanvasElement | null {
+    if (typeof document === 'undefined') return null;
+    const w = this.world;
+    const c = this.projImage ?? document.createElement('canvas');
+    c.width = w.W;
+    c.height = w.H;
+    const ctx = c.getContext('2d');
+    if (!ctx) return null;
+    const img = ctx.createImageData(w.W, w.H);
+    const d = img.data;
+    const a = pr.arrival;
+    for (let i = 0; i < w.N; i++) {
+      const t = a[i];
+      if (!(t > 0) || t > 48) continue;
+      const o = i * 4;
+      if (t <= 6) {
+        d[o] = 255;
+        d[o + 1] = 70;
+        d[o + 2] = 50;
+        d[o + 3] = 150;
+      } else if (t <= 12) {
+        d[o] = 255;
+        d[o + 1] = 140;
+        d[o + 2] = 50;
+        d[o + 3] = 125;
+      } else if (t <= 24) {
+        d[o] = 255;
+        d[o + 1] = 205;
+        d[o + 2] = 80;
+        d[o + 3] = 100;
+      } else {
+        d[o] = 255;
+        d[o + 1] = 240;
+        d[o + 2] = 180;
+        d[o + 3] = 75;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return c;
   }
 
   private frame(now: number): void {
@@ -237,9 +370,21 @@ export class GameSession {
     if (!this.sim.blocked && this.speed > 0 && !this.advisor.blockingStep) {
       clock.advance(SPEEDS[this.speed], () => {
         this.sim.tick();
-        if (this.sim.blocked) return false;
-        if (w.sub === 0 && w.doy % 90 === 0) this.autosave();
-        return !this.checkNewFires();
+        if (this.sim.blocked) {
+          this.skipping = false;
+          return false;
+        }
+        if (w.sub === 0 && w.doy % 90 === 0) {
+          this.autosave();
+          if (this.skipping) {
+            // nothing asked for attention all season: stop at its turn
+            this.skipping = false;
+            this.speed = 0;
+            this.toast('The season turns. Nothing needed you.', 'info');
+            return false;
+          }
+        }
+        return !this.checkStops();
       });
       // time may have been slowed for a new fire: owe no more than the new speed allows
       clock.capBacklog(SPEEDS[this.speed]);
@@ -253,7 +398,7 @@ export class GameSession {
     // lens refresh
     const lensInfo = LENSES.find((l) => l.id === this.lens)!;
     if (this.lens !== 'none' && this.lens !== 'zones' && (now - this.lastLens > (lensInfo.dynamic ? 700 : 3000) || this.lastLens === 0)) {
-      computeLens(w, this.lens, this.lensBuf);
+      computeLens(w, this.lens, this.lensBuf, lensInfo.fireshed ? this.getFireshed() : undefined);
       this.renderer.overlayVersion++;
       this.lastLens = now;
     }
@@ -290,25 +435,53 @@ export class GameSession {
       dayAlpha: Math.min(1, (w.sub + Math.min(1, clock.acc)) / SUBSTEPS_PER_DAY),
       time: now / 1000,
       towerRadius: this.tool.id === 'tower',
+      projection: this.projImage,
     };
     this.overlay.draw(w, this.cam, st, dpr);
     this.audio.update(w, this.cam, this.speed, this.settings.audio);
     if (now - this.lastUi > 200) {
       this.lastUi = now;
+      this.refreshProjection(now);
       this.advisor.update();
       this.toasts = this.toasts.filter((t) => now - t.at < 6000);
       this.emit();
     }
   }
 
-  /** Slow down when a new fire is reported. Returns true if the tick loop should stop. */
-  private checkNewFires(): boolean {
-    const n = this.world.fires.filter((f) => f.active && f.detected && f.cause !== 'prescribed').length;
-    const grew = n > this.detectedCount;
-    this.detectedCount = n;
-    if (grew && this.settings.autoSlow && this.speed > 1) {
+  /**
+   * Slow down or pause for what the simulation flags as needing attention (a notification's `stop`).
+   * Returns true if the tick loop should stop. (v1.x slowed for a newly reported fire and nothing else.)
+   */
+  private checkStops(): boolean {
+    const notes = this.world.notifications;
+    let stop = 0,
+      text = '';
+    for (let k = notes.length - 1; k >= 0 && notes[k].id > this.lastNote; k--) {
+      const st = notes[k].stop ?? 0;
+      if (st > stop) {
+        stop = st;
+        text = notes[k].text;
+      }
+    }
+    if (notes.length) this.lastNote = notes[notes.length - 1].id;
+    if (!stop) return false;
+    if (this.skipping) {
+      // "next event": anything flagged ends the run
+      this.skipping = false;
+      this.speed = 0;
+      this.prevSpeed = 1;
+      this.toast(text.length > 110 ? text.slice(0, 107) + '…' : text, 'warn');
+      return true;
+    }
+    if (stop === 2 && this.settings.autoPause && this.speed > 0) {
+      this.prevSpeed = Math.min(this.speed, 2);
+      this.speed = 0;
+      this.toast('Paused: this needs a decision.', 'warn');
+      return true;
+    }
+    if (this.settings.autoSlow && this.speed > 1) {
       this.speed = 1;
-      this.toast('A new fire has been reported — time slowed.', 'warn');
+      this.toast(stop === 2 ? 'Time slowed: this needs a decision.' : 'Time slowed.', 'warn');
       return true;
     }
     return false;
@@ -655,6 +828,14 @@ export class GameSession {
       return;
     }
     switch (k) {
+      case 'n':
+        this.advanceToEvent();
+        break;
+      case 'p':
+        this.settings.projection = !this.settings.projection;
+        this.projKey = '';
+        this.emit();
+        break;
       case 'q':
         this.setTool('inspect');
         break;

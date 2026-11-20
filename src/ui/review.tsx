@@ -4,6 +4,7 @@
 import type { GameSession } from '../app/session.ts';
 import { FACTIONS, FACTION_NAMES } from '../sim/types.ts';
 import { approvalColor, money, yearOfDay } from './format.ts';
+import { objectives } from '../sim/objectives.ts';
 
 const VERDICTS: Record<string, [string, string]> = {
   praise: ['The council is pleased.', 'Your stewardship has earned real confidence. Keep it.'],
@@ -53,6 +54,15 @@ export function ReviewModal({ s }: { s: GameSession }) {
                 </>
               ) : null}
             </div>
+            <h4 style={{ marginTop: '14px' }}>Your charge</h4>
+            {objectives(w).map((o) => (
+              <div class="row" style={{ fontSize: '12.5px', marginTop: '4px', alignItems: 'baseline' }} key={o.id}>
+                <span style={{ color: o.state === 'failed' ? 'var(--red)' : o.state === 'behind' ? 'var(--gold)' : 'var(--green)', width: '14px' }}>{o.state === 'failed' ? '✗' : o.state === 'behind' ? '…' : '✓'}</span>
+                <span class="grow">
+                  {o.title} <span class="faint">· {o.reading}</span>
+                </span>
+              </div>
+            ))}
             {highlights.length ? (
               <>
                 <h4 style={{ marginTop: '14px' }}>Remembered</h4>

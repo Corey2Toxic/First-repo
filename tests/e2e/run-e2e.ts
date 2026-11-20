@@ -174,10 +174,11 @@ try {
   st = await W();
   check(st.projects >= 1, 'thinning project queued');
   await page.keyboard.press('Escape');
+  const crews0 = st.crews;
   await page.click('.dock button:has-text("Crews")');
   await page.click('.drawer .btn:has-text("Hire") >> nth=0');
   st = await W();
-  check(st.crews === 4, 'hired a hand crew');
+  check(crews0 === 5 && st.crews === 6, 'hired a hand crew (' + crews0 + ' -> ' + st.crews + ')');
   await page.click('.drawer .close');
   await page.click('.dock button:has-text("Policies")');
   await page.click('.drawer .seg button:has-text("Firewise")');
@@ -197,12 +198,59 @@ try {
   }
   await page.click('#lens-none');
   check(true, 'lenses toggle');
-  for (const label of ['Fires', 'Council', 'Budget', 'Trends', 'Almanac', 'Field notes', 'Help']) {
+  for (const label of ['Fires', 'Charge', 'Council', 'Budget', 'Trends', 'Almanac', 'Field notes', 'Help']) {
     await page.click(`.dock button:has-text("${label}")`);
     await page.waitForTimeout(200);
     check(await page.isVisible('.drawer'), `${label} panel opens`);
     await page.click('.drawer .close');
   }
+
+  console.log('Seeing fire coming (v2)');
+  check((await page.$$('#forecast .fday')).length === 5, 'five-day forecast in the top bar');
+  await page.click('.dock button:has-text("Charge")');
+  check((await page.$$('.drawer .card')).length >= 3, 'the council\u2019s charge lists three objectives');
+  await page.click('.drawer .close');
+  for (const lens of ['fireshed', 'behaviour']) {
+    await page.click('#lens-' + lens);
+    await page.waitForTimeout(900);
+    const painted = await page.evaluate(() => {
+      const s = (window as any).fireweed;
+      const buf = s.renderer.overlayData as Uint8Array;
+      let n = 0;
+      for (let i = 3; i < buf.length; i += 4) if (buf[i] > 0) n++;
+      return n / (buf.length / 4);
+    });
+    check(painted > 0.02, lens + ' lens paints the valley (' + Math.round(painted * 100) + ' % of cells)');
+  }
+  await page.click('#lens-none');
+  // run on to the first wildfire anyone reports, and look at its incident card
+  const incident = await page.evaluate(() => {
+    const s = (window as any).fireweed;
+    const w = s.world;
+    for (let t = 0; t < 8 * 360 * 5; t++) {
+      if (w.review.pending) s.command({ t: 'closeReview' }, true);
+      if (w.outcome.ended) break;
+      s.sim.tick();
+      const fe = w.fires.find((f: any) => f.active && f.detected && f.cause !== 'prescribed' && f.cause !== 'pile' && f.area >= 3);
+      if (fe) {
+        s.setSpeed(0);
+        s.select({ type: 'fire', id: fe.id });
+        return { name: fe.name as string, active: true, area: fe.area as number, year: w.year as number };
+      }
+    }
+    return { name: '', active: false, area: 0, year: w.year as number };
+  });
+  if (incident && incident.name && incident.active) {
+    await page.waitForTimeout(1200);
+    check(await page.isVisible('#fire-projection'), 'incident card shows where the ' + incident.name + ' is headed');
+    check(await page.isVisible('#call-aid'), 'an outside team can be called from the fire\u2019s card');
+    const proj = await page.evaluate(() => {
+      const s = (window as any).fireweed;
+      return s.projection ? { horizon: s.projection.horizon, fire: s.projectionFire } : null;
+    });
+    check(proj !== null && proj.horizon === 48, 'a 48-hour spread projection is drawn for the selected fire');
+  } else check(false, 'a wildfire was reported within five years (' + JSON.stringify(incident) + ')');
+  await page.evaluate(() => (window as any).fireweed.select(null));
 
   console.log('Annual review');
   // run until the first council review, then answer it
@@ -238,7 +286,7 @@ try {
   await page.waitForFunction(() => (window as any).fireweed?.world?.valleyName !== undefined, null, { timeout: 60000 });
   await page.waitForTimeout(800);
   const loaded = await W();
-  check(Math.abs(loaded.day - savedDay) <= 1 && loaded.crews === 4, `saved game restored (day ${loaded.day}, ${loaded.crews} crews)`);
+  check(Math.abs(loaded.day - savedDay) <= 1 && loaded.crews === 6, `saved game restored (day ${loaded.day}, ${loaded.crews} crews)`);
 
   // D21: v1.0 crashed (RangeError, UI gone for good) going back to the small title valley from a
   // medium game with a lens on, and loading a smaller save from inside a larger game is the same hazard

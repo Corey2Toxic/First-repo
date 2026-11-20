@@ -10,7 +10,7 @@ import { discover } from './notes.ts';
 import { shock } from './systems/council.ts';
 import { bloomFactor } from './derived.ts';
 import { deerCount } from './systems/wildlife.ts';
-import { STAGE_NAME, buildFireReport, fileFireReport } from './incident.ts';
+import { ESCAPED_AREA, STAGE_NAME, buildFireReport, fileFireReport } from './incident.ts';
 
 function nearestName(w: World, x: number, y: number): string {
   let best = '',
@@ -54,14 +54,20 @@ export function makeEventHooks(w: World): SimHooks {
       const where = nearestName(w, fe.originX, fe.originY);
       const resp = fe.response === 'monitor' ? ' Wilderness policy: monitoring.' : '';
       const size = fe.area >= 2 ? `, already ${fe.area} ha` : '';
-      w.notify(`New ${CAUSE_TEXT[fe.cause] ?? ''} fire: the ${fe.name}, near ${where}${size}, reported by ${fe.detectedBy}.${resp}`, 'danger', fe.originX, fe.originY, fe.id, 1);
+      // found too late for initial attack: say so here, not in a second notice a moment later
+      const late = fe.area >= ESCAPED_AREA && fe.cause !== 'prescribed' && fe.cause !== 'pile';
+      if (late) {
+        fe.stage = 1;
+        discover(w, 'extended-attack');
+      }
+      w.notify(`New ${CAUSE_TEXT[fe.cause] ?? ''} fire: the ${fe.name}, near ${where}${size}, reported by ${fe.detectedBy}.${late ? ' It is past catching small.' : ''}${resp}`, 'danger', fe.originX, fe.originY, fe.id, late ? 2 : 1);
       if (w.weather.dryLightning && fe.cause === 'lightning') discover(w, 'dry-lightning');
     },
     onStage(fe: FireEvent, stage) {
       const x = Math.round((fe.minX + fe.maxX) / 2),
         y = Math.round((fe.minY + fe.maxY) / 2);
       if (stage === 1) {
-        w.notify(`The ${fe.name} has escaped initial attack: ${fe.area} ha and still moving. It is yours to manage now — draw line, call help, or decide what to give up.`, 'warn', x, y, fe.id, 2);
+        w.notify(`The ${fe.name} has escaped initial attack: ${fe.area} ha and still moving.`, 'warn', x, y, fe.id, 2);
         discover(w, 'extended-attack');
       } else if (stage === 2) {
         const why = fe.structuresLost > 0 ? 'homes are burning' : fe.inBuffer ? 'it is among the homes' : `${fe.area.toLocaleString('en-US')} ha`;

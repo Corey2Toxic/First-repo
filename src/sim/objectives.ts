@@ -53,7 +53,8 @@ function limit(id: string, title: string, charge: string, used: number, allowanc
 
 /** A target to be reached by the end of the tenure; `pace` is how far along it should be by now. */
 function reach(id: string, title: string, charge: string, done: number, reading: string, pace: number): Objective {
-  return { id, title, charge, reading, progress: clamp01(done), kind: 'reach', state: done >= 1 ? 'met' : done >= pace * 0.8 ? 'on-track' : 'behind' };
+  // nobody is behind in the first years: the pace is counted from 15 % of the way into the tenure
+  return { id, title, charge, reading, progress: clamp01(done), kind: 'reach', state: done >= 1 ? 'met' : done >= Math.max(0, pace - 0.15) * 0.8 ? 'on-track' : 'behind' };
 }
 
 function hold(id: string, title: string, charge: string, ok: boolean, margin: number, reading: string): Objective {

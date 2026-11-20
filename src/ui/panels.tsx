@@ -16,12 +16,15 @@ import { BarChart, LineChart } from './charts.tsx';
 import { canDownload, exportFile, importFile, listSlots, loadSlot, saveToSlot } from '../app/storage.ts';
 import type { SlotInfo } from '../app/storage.ts';
 import type { World } from '../sim/world.ts';
+import { STAGE_NAME, fireStage } from '../sim/incident.ts';
+import { ChargePanel, ReportView } from './incident.tsx';
 
 export function Drawer({ s, id, close, onLoad, onQuit }: { s: GameSession; id: PanelId; close: () => void; onLoad: (w: World) => void; onQuit: () => void }) {
   const titles: Record<PanelId, string> = {
     fires: 'Fires',
     crews: 'Crews',
     projects: 'Projects',
+    charge: 'The council’s charge',
     policies: 'Policies',
     council: 'The council',
     ledger: 'Budget',
@@ -43,6 +46,7 @@ export function Drawer({ s, id, close, onLoad, onQuit }: { s: GameSession; id: P
         {id === 'fires' && <FiresPanel s={s} close={close} />}
         {id === 'crews' && <CrewsPanel s={s} />}
         {id === 'projects' && <ProjectsPanel s={s} close={close} />}
+        {id === 'charge' && <ChargePanel s={s} />}
         {id === 'policies' && <PoliciesPanel s={s} />}
         {id === 'council' && <CouncilPanel s={s} />}
         {id === 'ledger' && <LedgerPanel s={s} />}
@@ -58,32 +62,61 @@ export function Drawer({ s, id, close, onLoad, onQuit }: { s: GameSession; id: P
 
 function FiresPanel({ s, close }: { s: GameSession; close: () => void }) {
   const w = s.world;
+  const [open, setOpen] = useState<number | null>(null);
   const active = w.fires.filter((f) => f.active && (f.detected || s.settings.reveal));
-  const recent = w.fires.filter((f) => !f.active && f.detected && w.day - f.outDay < 360).slice(-12).reverse();
+  const reports = w.reports.slice(-14).reverse();
+  const STAGE_COLOR = ['var(--gold)', 'var(--ember)', 'var(--red)'];
   return (
     <div class="list">
       {active.length === 0 ? <p class="dim">No fires are burning that anyone knows about.</p> : null}
-      {active.map((f) => (
-        <div class="card" key={f.id} style={{ cursor: 'pointer' }} onClick={() => (s.select({ type: 'fire', id: f.id }), s.focus((f.minX + f.maxX) / 2, (f.minY + f.maxY) / 2), close())}>
-          <div class="row">
-            <b class="grow">{f.name}</b>
-            <span class="tag">{f.response}</span>
+      {active.map((f) => {
+        const wild = f.cause !== 'prescribed' && f.cause !== 'pile';
+        const st = wild ? fireStage(w, f) : 0;
+        const grew = f.area - (f.areaYesterday ?? f.area);
+        return (
+          <div class="card" key={f.id} style={{ cursor: 'pointer' }} onClick={() => (s.select({ type: 'fire', id: f.id }), s.focus((f.minX + f.maxX) / 2, (f.minY + f.maxY) / 2), close())}>
+            <div class="row">
+              <b class="grow">{f.name}</b>
+              {wild ? (
+                <span class="tag" style={{ color: STAGE_COLOR[st] }}>
+                  {STAGE_NAME[st]}
+                </span>
+              ) : (
+                <span class="tag">prescribed</span>
+              )}
+            </div>
+            <div class="dim" style={{ fontSize: '12px' }}>
+              {ha(f.area)}
+              {grew > 0 && wild ? ` (+${ha(grew)} since yesterday)` : ''} · {pct(f.containment)} of its edge held · {w.crews.filter((c) => c.task?.fireId === f.id).length} crews · day {w.day - f.startDay + 1}
+              {f.crownArea ? ` · ${ha(f.crownArea)} crown` : ''}
+              {wild ? ` · ${f.response === 'contain' ? 'confine' : f.response}` : ''}
+            </div>
           </div>
-          <div class="dim" style={{ fontSize: '12px' }}>
-            {ha(f.area)} · {pct(f.containment)} contained · {w.crews.filter((c) => c.task?.fireId === f.id).length} crews · started {dayToDate(f.startDay)}
-            {f.crownArea ? ` · ${ha(f.crownArea)} crown` : ''}
-          </div>
-        </div>
-      ))}
-      {recent.length ? (
+        );
+      })}
+      {reports.length ? (
         <>
-          <h4 style={{ margin: '16px 0 8px' }}>Recently out</h4>
-          {recent.map((f) => (
-            <div class="row" style={{ fontSize: '12.5px', padding: '3px 0' }} key={f.id}>
-              <span class="grow">{f.name}</span>
-              <span class="dim">
-                {ha(f.area)} · {f.outDay - f.startDay} days{f.structuresLost ? ` · ${f.structuresLost} homes` : ''}
-              </span>
+          <h4 style={{ margin: '16px 0 8px' }}>After-action reports</h4>
+          {reports.map((r) => (
+            <div class="card" key={r.fireId} style={{ cursor: 'pointer' }} onClick={() => setOpen(open === r.fireId ? null : r.fireId)}>
+              <div class="row" style={{ fontSize: '12.5px' }}>
+                <b class="grow">{r.name}</b>
+                <span class="dim">
+                  {dayToDate(r.startDay)} · {ha(r.area)} · {Math.max(1, r.outDay - r.startDay)} d{r.homesLost ? ` · ${r.homesLost} homes` : ''}
+                </span>
+              </div>
+              {open === r.fireId ? (
+                <>
+                  <ReportView r={r} />
+                  <button class="btn small" style={{ marginTop: '8px' }} onClick={(e) => (e.stopPropagation(), s.focus(r.x, r.y), close())}>
+                    Show on the map
+                  </button>
+                </>
+              ) : (
+                <div class="faint" style={{ fontSize: '12px', marginTop: '2px' }}>
+                  {r.text[0]}
+                </div>
+              )}
             </div>
           ))}
         </>
@@ -201,6 +234,7 @@ const POLICIES: PolicyDef[] = [
   { key: 'hunting', name: 'Deer hunting', options: [['none', 'None'], ['moderate', 'Moderate'], ['heavy', 'Heavy']], desc: 'Autumn hunts bring license fees and fewer deer.' },
   { key: 'airPatrol', name: 'Air patrol', options: [[false, 'Off'], [true, 'On ($55k/yr)']], desc: 'Spotter flights find remote fires while they are small.' },
   { key: 'smokeRules', name: 'Smoke rules', options: [[false, 'Off'], [true, 'On']], desc: 'Burns only on days with good smoke dispersal. Fewer burn windows; less smoke.' },
+  { key: 'mutualAid', name: 'Outside incident teams', options: [['auto', 'Standing order'], ['manual', 'Only when I call']], desc: 'With a standing order a team is called as soon as an escaped fire of 150 ha threatens a town, if there is a week of its bills in hand ($25k to mobilise, $20k a day). Otherwise you call from the fire’s own panel.' },
 ];
 
 function PoliciesPanel({ s }: { s: GameSession }) {
@@ -482,9 +516,10 @@ function HelpPanel() {
       <div>
         <h3>The idea</h3>
         <p class="dim">
-          You are warden of a mountain valley for decades. Forests grow, burn and regrow; deer, wolves and beavers reshape the streams; towns grow into the
-          trees. Fire is inevitable. Suppress every fire and fuel piles up until one fire you cannot stop arrives. Let fire work — or bring it yourself in
-          mild weather — and the forest stays open, patchy and resilient. Five constituencies judge every choice.
+          You are warden of a mountain valley for twenty years or so. You cannot stop fire; you can only choose it. Put out every fire and the forest fills
+          with thickets until a fire arrives that no one can face. Bring fire back in mild weather, thin and burn around the towns, and the fire that comes
+          on a bad day arrives on the ground, where crews can stand in front of it and homes survive it. The council has given you a charge (bottom bar);
+          five constituencies judge the rest.
         </p>
       </div>
       <div>
@@ -493,31 +528,42 @@ function HelpPanel() {
           <span class="k">Pan / zoom</span>
           <span>drag, WASD/arrows · scroll wheel, + / −</span>
           <span class="k">Time</span>
-          <span>Space pause · 1–4 speed</span>
+          <span>Space pause · 1–4 speed · N run to the next thing that needs you</span>
           <span class="k">Tools</span>
           <span>Q inspect · Z zones · T thin · B burn · F fireline · X air tanker</span>
           <span class="k">Brush</span>
           <span>[ and ] · right-click or Esc to cancel · Shift-drag erases zones</span>
           <span class="k">Lenses</span>
-          <span>L cycles; buttons top-right</span>
+          <span>L cycles; buttons top-right · P shows or hides where fires are expected to spread</span>
         </div>
+      </div>
+      <div>
+        <h3>Seeing it coming</h3>
+        <p class="dim">
+          The coloured squares in the top bar are the forecast for the next five days; a bright ring is a red-flag day. The <b>Fireshed</b> lens shows how
+          long a fire starting anywhere would need to reach homes on a bad day, and <b>Bad-day fire</b> shows what it would do in each stand: ground a hand
+          crew could hold, ground only engines or aircraft could, and ground that would torch. Each town shows the share of its homes such a day would take.
+          Thinning and burning move ground down that scale; hardening homes (the Firewise building code) lets them survive what arrives.
+        </p>
       </div>
       <div>
         <h3>A first plan</h3>
         <ol class="dim" style={{ paddingLeft: '18px', margin: 0 }}>
-          <li>Check the Fuel hazard lens around each town.</li>
-          <li>Zone Community Buffers and queue thinning or prescribed burns there.</li>
-          <li>Set remote high country to Wilderness — lightning fires there can be left to burn when it is safe.</li>
-          <li>When fires start, decide: Suppress, Contain, or Monitor. Watch the wind.</li>
-          <li>Keep an eye on the council. Spend your money before the review.</li>
+          <li>Open the Fireshed lens. The red and orange ground upwind of each town is where to work.</li>
+          <li>Thin the first few hundred metres around homes; burn beyond them. A burn is lit only on a day the burn boss calls a go (select the unit to see why not).</li>
+          <li>Build a lookout or two and hire crews: fires caught in their first hours stay small.</li>
+          <li>Set remote high country to Wilderness, where lightning fires in mild weather can be left to do the burning for you.</li>
+          <li>Read the forecast before the season, and the council’s charge before the review.</li>
         </ol>
       </div>
       <div>
-        <h3>How fire behaves</h3>
+        <h3>When a fire gets away</h3>
         <p class="dim">
-          Spread depends on fine-fuel load and moisture, wind along the direction of spread, and slope (uphill runs fast). Surface fire turns into crown fire
-          where ladder fuels — shrubs and young fir — connect it to the canopy. Intense fires throw embers that cross rivers and lines. Fires lie down at night
-          and smoulder; damp days put them out; dry winds wake them up.
+          Most fires are caught small. One that is not becomes a campaign of days. Select it: the bar shows how much of its edge each kind of crew can work
+          (fire is fought by flame length, and flanks burn lower than the head), and the shading on the map is where it is expected to be in 6, 12, 24 and
+          48 hours if left alone. Fire lies down at night: that is when line holds. Draw line where the fire will be tomorrow, send engines to the homes in
+          its path, call an outside team early or not at all, and choose <i>Confine</i> to hold only the side that matters. When it is out, its
+          after-action report says what stopped it and how the ground you had prepared burned.
         </p>
       </div>
     </div>
@@ -592,6 +638,8 @@ function MenuPanel({ s, onLoad, onQuit }: { s: GameSession; onLoad: (w: World) =
       <div>
         <h3>Settings</h3>
         {toggle('autoSlow', 'Slow time when a new fire is reported')}
+        {toggle('autoPause', 'Pause when something needs a decision (an escaped fire, a town in a fire’s path)')}
+        {toggle('projection', 'Shade where reported fires are expected to spread (P)')}
         {toggle('labels', 'Place-name labels')}
         {toggle('wildlife', 'Show wildlife on the map')}
         {toggle('contours', 'Contour lines')}

@@ -3,15 +3,14 @@
  */
 import type { GameSession } from '../app/session.ts';
 import { FACTION_NAMES, FIRE, MONTH_NAMES, ZONE_NAMES } from '../sim/types.ts';
-import type { FireResponse } from '../sim/types.ts';
 import { cellFuel, hazardIndex } from '../sim/systems/fuels.ts';
 import { greenness } from '../sim/derived.ts';
-import { fireThreat } from '../sim/systems/crews.ts';
 import { deerCount, wolfCount } from '../sim/systems/wildlife.ts';
 import { PROJECT_NAMES } from '../sim/systems/projects.ts';
 import { DANGER_COLORS, dayToDate, ha, money, pct } from './format.ts';
 import { CREW_LABEL } from './hud.tsx';
-import { Icons } from './icons.tsx';
+import { FireView } from './incident.tsx';
+import { burnCrewsNeeded, burnOutlook } from '../sim/systems/projects.ts';
 
 const SEV = ['—', 'low', 'moderate', 'high'];
 
@@ -74,9 +73,17 @@ function Overview({ s }: { s: GameSession }) {
         <div class="row" style={{ padding: '4px 0', cursor: 'pointer' }} onClick={() => (s.select({ type: 'town', id: t.id }), s.focus(t.x, t.y))} key={t.id}>
           <b class="grow">{t.name}</b>
           <span class="dim num">{t.population.toLocaleString()}</span>
-          <span class="tag" title="Firewise rating" style={{ color: t.firewise > 0.5 ? 'var(--green)' : t.firewise > 0.3 ? 'var(--gold)' : 'var(--red)' }}>
-            firewise {pct(t.firewise)}
-          </span>
+          {(() => {
+            const te = w.memory.exposure?.towns.find((x) => x.id === t.id);
+            const share = te && te.homes ? te.exposed / te.homes : null;
+            return share === null ? (
+              <span class="tag" title="Firewise rating">firewise {pct(t.firewise)}</span>
+            ) : (
+              <span class="tag" title="Share of this town's homes a bad fire day would take (surveyed each new year)" style={{ color: share > 0.4 ? 'var(--red)' : share > 0.15 ? 'var(--gold)' : 'var(--green)' }}>
+                {pct(share)} at risk
+              </span>
+            );
+          })()}
         </div>
       ))}
       <div class="sep" />
@@ -247,108 +254,6 @@ function CellView({ s, cell }: { s: GameSession; cell: number }) {
   );
 }
 
-function FireView({ s, id }: { s: GameSession; id: number }) {
-  const w = s.world;
-  const fe = w.fires.find((f) => f.id === id)!;
-  const th = fireThreat(w, fe);
-  const town = th.town >= 0 ? w.towns[th.town] : null;
-  const crews = w.crews.filter((c) => c.task?.fireId === fe.id);
-  const idle = w.crews.filter((c) => c.state === 'idle' || (c.task?.kind === 'project' && !c.manual && w.projects.find((p) => p.id === c.task!.projectId)?.status !== 'burning'));
-  const days = (fe.active ? w.day : fe.outDay) - fe.startDay;
-  const resp: Array<[FireResponse, string, string]> = [
-    ['suppress', 'Suppress', 'All-out attack: crews hit every edge they safely can. Expensive.'],
-    ['contain', 'Contain', 'Protect towns and roads; let the fire burn elsewhere.'],
-    ['monitor', 'Monitor', 'Watch it work. No crews unless you send them.'],
-  ];
-  return (
-    <div>
-      <Header s={s} title={fe.name} sub={`${fe.cause === 'prescribed' ? 'Prescribed burn' : fe.cause === 'escaped' ? 'Escaped prescribed burn' : fe.cause === 'human' ? 'Human-caused' : 'Lightning'} · started ${dayToDate(fe.startDay)} · ${days} day${days === 1 ? '' : 's'}`} />
-      <div class="grid2" style={{ marginTop: '10px', gap: '8px' }}>
-        <div class="card">
-          <div class="faint" style={{ fontSize: '11px' }}>
-            AREA
-          </div>
-          <div style={{ fontSize: '20px', fontWeight: 700 }}>{ha(fe.area)}</div>
-        </div>
-        <div class="card">
-          <div class="faint" style={{ fontSize: '11px' }}>
-            CONTAINED
-          </div>
-          <div style={{ fontSize: '20px', fontWeight: 700 }}>{fe.active ? pct(fe.containment) : 'out'}</div>
-        </div>
-      </div>
-      <div class="kv" style={{ marginTop: '8px' }}>
-        <span class="k">Burning now</span>
-        <span class="v">{fe.burning} ha</span>
-        <span class="k">Crown fire</span>
-        <span class="v" style={{ color: fe.crownArea ? 'var(--red)' : undefined }}>
-          {fe.crownArea ? `${ha(fe.crownArea)} (${pct(fe.crownArea / Math.max(1, fe.area))})` : 'none'}
-        </span>
-        <span class="k">Spot fires</span>
-        <span class="v">{fe.spotFires}</span>
-        <span class="k">Nearest town</span>
-        <span class="v" style={{ color: th.dist < 8 ? 'var(--red)' : undefined }}>
-          {town ? `${town.name}, ${(th.dist / 10).toFixed(1)} km` : '—'}
-        </span>
-        <span class="k">Homes lost</span>
-        <span class="v">{fe.structuresLost}</span>
-        <span class="k">Cost so far</span>
-        <span class="v">{money(fe.cost)}</span>
-        <span class="k">Reported by</span>
-        <span class="v">{fe.detectedBy || '—'}</span>
-      </div>
-      {fe.active && fe.cause !== 'prescribed' ? (
-        <>
-          <h4 style={{ marginTop: '12px' }}>Response</h4>
-          <div class="col" style={{ marginTop: '6px', gap: '4px' }}>
-            {resp.map(([r, n, d]) => (
-              <div class={'opt card' + (fe.response === r ? '' : '')} style={{ cursor: 'pointer', borderColor: fe.response === r ? 'var(--ember)' : undefined, background: fe.response === r ? 'rgba(232,116,59,0.1)' : undefined, padding: '7px 10px' }} onClick={() => s.command({ t: 'fireResponse', fireId: fe.id, response: r })} key={r}>
-                <b>{n}</b> <span class="faint" style={{ fontSize: '12px' }}>— {d}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      ) : null}
-      {fe.active ? (
-        <>
-          <h4 style={{ marginTop: '12px' }}>Crews on this fire</h4>
-          {crews.length === 0 ? <div class="faint" style={{ fontSize: '12px', marginTop: '4px' }}>None.</div> : null}
-          {crews.map((c) => (
-            <div class="row" style={{ padding: '3px 0' }} key={c.id}>
-              <span class="grow">
-                {c.name} <span class="faint">· {c.state}</span>
-              </span>
-              <button class="btn small" onClick={() => s.command({ t: 'recallCrew', crewId: c.id })}>
-                Recall
-              </button>
-            </div>
-          ))}
-          {idle.length > 0 && fe.cause !== 'prescribed' ? (
-            <div class="row" style={{ flexWrap: 'wrap', marginTop: '6px', gap: '4px' }}>
-              {idle.slice(0, 6).map((c) => (
-                <button class="btn small" onClick={() => s.command({ t: 'sendCrew', crewId: c.id, fireId: fe.id })} key={c.id}>
-                  Send {c.name}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <div class="row" style={{ marginTop: '10px', gap: '6px' }}>
-            <button class="btn small" onClick={() => s.setTool('fireline')}>
-              {Icons.fireline({ size: 14 })} Cut line
-            </button>
-            <button class="btn small" onClick={() => s.setTool('airdrop')}>
-              {Icons.airdrop({ size: 14 })} Air tanker
-            </button>
-            <button class="btn small" onClick={() => s.focus((fe.minX + fe.maxX) / 2, (fe.minY + fe.maxY) / 2)}>
-              {Icons.target({ size: 13 })} Focus
-            </button>
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
 function CrewView({ s, id }: { s: GameSession; id: number }) {
   const w = s.world;
   const c = w.crews.find((x) => x.id === id);
@@ -394,6 +299,25 @@ function TownView({ s, id }: { s: GameSession; id: number }) {
   return (
     <div>
       <Header s={s} title={t.name} sub={`${t.population.toLocaleString()} people · ${t.structures} homes${t.mill ? ' · sawmill' : ''}`} />
+      {(() => {
+        const te = w.memory.exposure?.towns.find((x) => x.id === t.id);
+        if (!te || !te.homes) return null;
+        const share = te.exposed / te.homes;
+        return (
+          <div class="card" style={{ marginTop: '10px' }}>
+            <div class="faint" style={{ fontSize: '11px' }}>
+              ON A BAD FIRE DAY
+            </div>
+            <div style={{ fontSize: '18px', fontWeight: 700, color: share > 0.4 ? 'var(--red)' : share > 0.15 ? 'var(--gold)' : 'var(--green)' }}>
+              {Math.round(te.exposed)} of {te.homes} homes would burn
+            </div>
+            <div class="faint" style={{ fontSize: '12px', marginTop: '3px' }}>
+              {te.crownEdge > 0.3 ? `Crown fire would reach ${pct(te.crownEdge)} of the town's edge. ` : te.crownEdge > 0 ? `Crown fire would reach ${pct(te.crownEdge)} of its edge. ` : 'Fire would arrive on the ground. '}
+              {te.area12.toLocaleString()} ha of country could deliver a fire here within one burning period. Surveyed each new year; the Fireshed lens shows it now.
+            </div>
+          </div>
+        );
+      })()}
       <h4 style={{ marginTop: '10px' }}>Firewise readiness</h4>
       <div class="row" style={{ marginTop: '6px' }}>
         <div class="grow">
@@ -402,7 +326,7 @@ function TownView({ s, id }: { s: GameSession; id: number }) {
         <span class="num">{pct(t.firewise)}</span>
       </div>
       <div class="faint" style={{ fontSize: '12px', marginTop: '4px' }}>
-        Rises with the firewise building code and with low fuel hazard within ~400 m of homes (thinning, burns, fuel breaks, recent fire).
+        Hardened homes: ember-proof roofs and vents, cleared yards. Rises with the firewise building code (a five-year programme) and with treated ground within ~400 m. A hardened home survives flames that take its neighbour.
       </div>
       <div class="kv" style={{ marginTop: '8px' }}>
         <span class="k">Fire threat now</span>
@@ -464,9 +388,31 @@ function ProjectView({ s, id }: { s: GameSession; id: number }) {
         <span class="k">Crews</span>
         <span class="v">{crews.map((c) => c.name).join(', ') || 'none yet'}</span>
       </div>
+      {pr.kind === 'burn' && pr.status !== 'done' && pr.status !== 'cancelled' && pr.status !== 'burning'
+        ? (() => {
+            const o = burnOutlook(w, pr);
+            const need = burnCrewsNeeded(pr);
+            return (
+              <div class="card" style={{ marginTop: '8px' }} id="burn-outlook">
+                <div class="faint" style={{ fontSize: '11px' }}>
+                  THE BURN BOSS, TODAY
+                </div>
+                <div style={{ fontWeight: 700, color: o.problem ? 'var(--gold)' : 'var(--green)' }}>{o.problem ? 'No go: ' + o.problem : 'Go: in prescription'}</div>
+                <div class="faint" style={{ fontSize: '12px', marginTop: '3px' }}>
+                  Fire would carry across {pct(o.carry)} of the unit this afternoon; {pct(o.hot)} of it would burn too hot to hold. Needs {need} free hand crew{need === 1 ? '' : 's'} to light and hold it.
+                  {pr.note ? ' ' + pr.note : ''}
+                </div>
+              </div>
+            );
+          })()
+        : null}
       {pr.kind === 'burn' ? (
         <div class="faint" style={{ fontSize: '12px', marginTop: '6px' }}>
-          Burns are lit only at Low/Moderate danger, wind under 23 km/h, fine-fuel moisture 7–22% and no snow on the unit.
+          Lit only on a day when fire will carry but stay on the ground: low or moderate danger, wind under 23 km/h, no wind event in the forecast. You are charged for what burns.
+        </div>
+      ) : pr.note ? (
+        <div class="faint" style={{ fontSize: '12px', marginTop: '6px' }}>
+          {pr.note}
         </div>
       ) : null}
       {pr.status !== 'burning' && pr.status !== 'done' && pr.status !== 'cancelled' ? (

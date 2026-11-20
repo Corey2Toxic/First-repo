@@ -67,7 +67,7 @@ export class Advisor {
       {
         id: 'welcome',
         title: `Welcome to ${w.valleyName}, Warden`,
-        body: `You manage the land around ${w.towns.map((t) => t.name).join(', ')}. Forests, fires, wildlife and five quarrelsome constituencies are yours for ${w.config.tenureYears} years. Fire is not your enemy — it is how this land renews itself. Your job is to decide where, when and how it burns.`,
+        body: `You manage the land around ${w.towns.map((t) => t.name).join(', ')}. Forests, fires, wildlife and five quarrelsome constituencies are yours for ${w.config.tenureYears} years. You cannot stop fire here; you can only choose it — where, when and how it burns. The council has given you a charge (bottom bar) to be judged by.`,
         action: 'Show me around',
         blocking: true,
         done: () => this.acked,
@@ -85,7 +85,7 @@ export class Advisor {
       {
         id: 'lens',
         title: 'See what the eye cannot',
-        body: 'Lenses reveal the hidden state of the valley. Open the Fuel hazard lens (top right, or press L) — red stands will burn as crown fires; green ones will burn gently, if at all.',
+        body: 'Lenses reveal the hidden state of the valley. Open the Fuel hazard lens (top right, or press L) — red stands will burn as crown fires; green ones will burn gently, if at all. Beside it, Fireshed shows how long a fire starting anywhere would need to reach homes on a bad day: the ground that matters most.',
         highlight: 'lens-hazard',
         done: (s) => s.lens === 'hazard',
       },
@@ -100,14 +100,14 @@ export class Advisor {
       {
         id: 'treat',
         title: 'Reduce the fuel',
-        body: 'Choose a treatment and paint it onto high-hazard ground near town: Thinning removes ladder fuels ($1.4k/ha); a Prescribed burn is cheap ($230/ha) but waits for a mild, damp "burn window". Crews work projects whenever no fire needs them.',
+        body: 'Choose a treatment and paint it onto high-hazard ground near town: Thinning clears the thicket under the big trees ($1.4k/ha); a Prescribed burn is cheap ($230/ha, charged for what burns) but waits for a day the burn boss calls a go. Neither stops a fire: they bring it down to the ground, where crews can face it and homes survive it. Crews work projects whenever no fire needs them.',
         highlight: 'tool-burn',
         done: () => this.treated,
       },
       {
         id: 'time',
         title: 'Let time run',
-        body: 'Press Play or Space. Speeds 1–4 run from "watch the fire" to "skip the winter". Run time on into summer: fire season comes as the grass cures and the danger rating in the top bar climbs to High. Time slows by itself when a new fire is reported.',
+        body: 'Press Play or Space. Speeds 1–4 run from "watch the fire" to "skip the winter", and Next runs fast until something needs you. Run time on into summer: fire season comes as the grass cures and the danger rating in the top bar climbs to High. The coloured squares beside it are the forecast for the next five days. Time slows by itself when a fire is reported.',
         highlight: 'speed',
         // the lesson waits for fire weather (v1.0 struck 12 days in, in early spring, and the fire
         // died within hours): a fire reported meanwhile, a High-danger summer or autumn afternoon,
@@ -121,7 +121,7 @@ export class Advisor {
       {
         id: 'fire',
         title: 'Fire!',
-        body: 'A fire has been reported. Click it to open its card. Choose how to respond: Suppress (all-out attack), Contain (protect values, let the rest burn), or Monitor (let it do its work). Every choice has a price.',
+        body: 'A fire has been reported. Click it to open its card. Choose how to respond: Suppress (all-out attack), Confine (protect values, let the rest burn), or Monitor (let it do its work). Every choice has a price.',
         action: 'Next',
         done: () => this.acked || this.responded,
         onEnter: (s) => this.ensureFire(s),
@@ -130,7 +130,14 @@ export class Advisor {
       {
         id: 'crews',
         title: 'Your crews',
-        body: 'Crews dispatch automatically to fires you are suppressing. You can also take command: cut fireline (F), order an air-tanker drop (X), or send a crew from its card. Crown fires are too hot to engage — crews pull back and wait for the fire to come down.',
+        body: 'Crews dispatch automatically to fires you are suppressing. Fire is fought by flame length: the bar on the fire’s card shows how much of its edge hand crews, engines and aircraft can work. Flanks burn lower than the head, and everything burns lower at night. You can also take command: cut fireline (F), order an air-tanker drop (X), or send a crew from its card.',
+        action: 'Next',
+        done: () => this.acked,
+      },
+      {
+        id: 'ahead',
+        title: 'Where it is going',
+        body: 'The shading ahead of a fire is where it is expected to be in 6, 12, 24 and 48 hours if nobody stops it, under today’s weather and the forecast. Most fires are caught small. One that is not becomes a campaign of days with a briefing each morning: put line and engines where the fire will be, not where it is. When it is out, its after-action report (Fires) says what held it.',
         action: 'Next',
         done: () => this.acked,
       },
@@ -140,6 +147,14 @@ export class Advisor {
         body: 'Residents, the timber mill, ranchers, conservationists and outfitters each judge you by different measures. At year’s end the council reviews your work, hears petitions, and sets your budget. Unspent money mostly goes back to the county — spend it on the land.',
         action: 'Next',
         highlight: 'panel-council',
+        done: () => this.acked,
+      },
+      {
+        id: 'charge',
+        title: 'Your charge',
+        body: 'The council asked three things of you in particular. Open Charge to see them and how each stands. The middle one usually comes down to the same work: the share of homes a bad fire day would take, which thinning, burning and hardening around the towns bring down.',
+        action: 'Next',
+        highlight: 'panel-charge',
         done: () => this.acked,
       },
       {
@@ -237,7 +252,7 @@ export class Advisor {
   /** The "Fire!" card tells the truth about the lesson fire, and holds time only while it burns. */
   private fireCard(s: GameSession): Partial<AdvisorCard> {
     const w = s.world;
-    const choose = 'Choose how to respond: Suppress (all-out attack), Contain (protect values, let the rest burn), or Monitor (let it do its work). Every choice has a price.';
+    const choose = 'Choose how to respond: Suppress (all-out attack), Confine (protect values, let the rest burn), or Monitor (let it do its work). Every choice has a price.';
     const fe = this.lessonFireId >= 0 ? w.fires.find((f) => f.id === this.lessonFireId) : undefined;
     if (fe && fe.active)
       return {
@@ -285,7 +300,7 @@ export class Advisor {
           n++;
         }
       if (n && hz / n > 0.4)
-        tips.push({ id: 'buffer-' + town.id + '-' + w.year, title: `${town.name} is exposed`, body: `The forest around ${town.name} is heavy with fuel and its firewise rating is ${Math.round(town.firewise * 100)}%. Thinning or burning within 400 m of houses is the best insurance there is.`, focus: [town.x, town.y] });
+        tips.push({ id: 'buffer-' + town.id + '-' + w.year, title: `${town.name} is exposed`, body: `The forest around ${town.name} is heavy with fuel: ${exposedText(w, town.id)}. Thinning within 400 m of houses and burning beyond is the best insurance there is; the Fireshed lens shows where a fire would come from.`, focus: [town.x, town.y] });
     }
     const burnQueued = w.projects.some((p) => p.kind === 'burn' && (p.status === 'queued' || p.status === 'waiting' || p.status === 'active'));
     if ((w.season === 0 || w.season === 2) && w.weather.dangerClass <= 1 && !burnQueued && w.economy.funds > 60000) {
@@ -325,6 +340,13 @@ export class Advisor {
       this.dismissed.add(fresh.id);
     } else if (this.tip && now - this.lastTipAt > 25000) this.tip = null;
   }
+}
+
+/** What the last yearly survey says a bad fire day would do to a town. */
+function exposedText(w: World, townId: number): string {
+  const te = w.memory.exposure?.towns.find((t) => t.id === townId);
+  if (!te || !te.homes) return `its firewise rating is ${Math.round((w.towns[townId]?.firewise ?? 0) * 100)}%`;
+  return `a bad fire day would take about ${Math.round(te.exposed)} of its ${te.homes} homes`;
 }
 
 function cap(s: string): string {

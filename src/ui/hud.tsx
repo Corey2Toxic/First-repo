@@ -12,8 +12,10 @@ import { LENSES } from '../render/lenses.ts';
 import { SP, ZONE, ZONE_NAMES } from '../sim/types.ts';
 import { COST, CREW_COST } from '../sim/economyParams.ts';
 import { projectCostPerCell } from '../sim/systems/projects.ts';
+import { objectives } from '../sim/objectives.ts';
+import { ForecastStrip } from './incident.tsx';
 
-export type PanelId = 'fires' | 'crews' | 'projects' | 'policies' | 'council' | 'ledger' | 'charts' | 'almanac' | 'notes' | 'help' | 'menu';
+export type PanelId = 'fires' | 'crews' | 'projects' | 'charge' | 'policies' | 'council' | 'ledger' | 'charts' | 'almanac' | 'notes' | 'help' | 'menu';
 
 export function TopBar({ s, openPanel }: { s: GameSession; openPanel: (p: PanelId) => void }) {
   const w = s.world;
@@ -21,6 +23,7 @@ export function TopBar({ s, openPanel }: { s: GameSession; openPanel: (p: PanelI
   const trust = w.trust;
   const fires = w.fires.filter((f) => f.active && f.detected && f.cause !== 'prescribed').length;
   const arrowDeg = (wx.windDir * 180) / Math.PI;
+  const charges = objectives(w);
   const bar = useRef<HTMLDivElement>(null);
   // The bar wraps onto several rows on narrow screens; publish where it ends so
   // the panels below it (tools, lenses, drawers, flyouts, toasts) start there.
@@ -43,12 +46,15 @@ export function TopBar({ s, openPanel }: { s: GameSession; openPanel: (p: PanelI
           Year {w.year} of {w.config.tenureYears} · {dateStr(w)} · {hourStr(w.sub)}
         </div>
       </div>
-      <div class="speeds" id="speed" title="Space: pause · 1–4: speed">
+      <div class="speeds" id="speed" title="Space: pause · 1–4: speed · N: run to the next thing that needs you">
         {[0, 1, 2, 3, 4].map((k) => (
-          <button class={s.speed === k ? 'on' : ''} onClick={() => s.setSpeed(k)} title={SPEED_NAMES[k]} aria-label={SPEED_NAMES[k]}>
+          <button class={s.speed === k && !s.skipping ? 'on' : ''} onClick={() => s.setSpeed(k)} title={SPEED_NAMES[k]} aria-label={SPEED_NAMES[k]}>
             {k === 0 ? Icons.pause({ size: 14 }) : <span style={{ display: 'flex' }}>{Array.from({ length: k }, () => Icons.play({ size: 9 }))}</span>}
           </button>
         ))}
+        <button class={'next' + (s.skipping ? ' on' : '')} id="next-event" onClick={() => s.advanceToEvent()} title="Run fast until something needs you: a fire, a fire-weather watch, a briefing, the turn of the season (N)" aria-label="Run to the next event">
+          Next ▸▸
+        </button>
       </div>
       <div class="stat" title={`Annual allocation ${money(w.economy.annualBudget)}`}>
         <span class="k">Funds</span>
@@ -65,9 +71,18 @@ export function TopBar({ s, openPanel }: { s: GameSession; openPanel: (p: PanelI
           <i style={{ width: `${trust}%`, background: approvalColor(trust) }} />
         </div>
       </div>
+      <div class="stat p charge-chip" onClick={() => openPanel('charge')} title="The council's charge — click for details" id="panel-charge">
+        <span class="k">Charge</span>
+        <div class="pips">
+          {charges.map((o) => (
+            <i style={{ background: o.state === 'failed' ? 'var(--red)' : o.state === 'behind' ? 'var(--gold)' : o.kind === 'reach' && o.progress < 1 ? `linear-gradient(90deg, var(--green) ${o.progress * 100}%, rgba(255,255,255,0.14) ${o.progress * 100}%)` : 'var(--green)' }} title={`${o.title}: ${o.reading}`} key={o.id} />
+          ))}
+        </div>
+      </div>
       <div class="danger-badge" style={{ background: DANGER_COLORS[wx.dangerClass] + '33', color: DANGER_COLORS[wx.dangerClass], border: `1px solid ${DANGER_COLORS[wx.dangerClass]}88` }} title="Valley fire danger today">
         {DANGER_NAMES[wx.dangerClass]} danger{w.memory.fireBanActive ? ' · ban' : ''}
       </div>
+      <ForecastStrip s={s} />
       <div class="wx">
         <span title="Temperature (valley floor)">{Math.round(wx.tmax)}°C</span>
         <span title={`Wind from the ${compass(wx.windDir)}`}>
@@ -441,6 +456,7 @@ export function Dock({ s, panel, openPanel }: { s: GameSession; panel: PanelId |
     ['fires', 'Fires', 'fire', fires],
     ['crews', 'Crews', 'crew'],
     ['projects', 'Projects', 'project'],
+    ['charge', 'Charge', 'target'],
     ['policies', 'Policies', 'policy'],
     ['council', 'Council', 'council'],
     ['ledger', 'Budget', 'ledger'],

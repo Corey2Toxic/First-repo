@@ -14,6 +14,8 @@ export interface ScenarioInfo {
   tagline: string;
   description: string;
   difficulty: 1 | 2 | 3 | 4;
+  /** the council's charge in brief, for the new-game screen (objectives.ts holds the working version) */
+  charge: [string, string, string];
   config: Omit<GameConfig, 'seed' | 'scenario' | 'width' | 'height'>;
 }
 
@@ -25,6 +27,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description:
       'A healthy, patchy forest shaped by generations of natural fire. Wolves and beavers are present, the council is patient, and an advisor walks you through your first fire season. Twenty years to make your mark.',
     difficulty: 1,
+    charge: ['Lose no more than 5 homes', 'Cut by a third the homes a bad fire day would take', 'Put fire back to work: low and moderate fire on 0.6 % of the valley a year'],
     config: {
       tenureYears: 20,
       difficulty: 'gentle',
@@ -46,6 +49,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description:
       'For a hundred years every fire was suppressed. Fir has crowded into the pine, litter lies ankle-deep, and the summers are getting hotter. Can you bring fire back on your own terms before it returns on its own?',
     difficulty: 3,
+    charge: ['Lose no more than 15 homes', 'Halve the homes a bad fire day would take', 'Keep severe fire under 30 % of what burns'],
     config: {
       tenureYears: 25,
       difficulty: 'standard',
@@ -67,6 +71,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description:
       'A vast burn scar of standing dead timber. Hillsides that will shed soil in the first heavy storm, a reservoir downstream, a mill that wants to salvage, and a forest that knows how to come back — if you let it.',
     difficulty: 2,
+    charge: ['Keep the reservoir less than 25 % silted', 'Lose no more than 8 homes', 'Let the aspen come back: 30 % of stands young'],
     config: {
       tenureYears: 20,
       difficulty: 'standard',
@@ -88,6 +93,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description:
       'The valley is booming. New houses push into the forest every year, the mill is hungry, and visitors pour in each summer. Growth pays the bills — and puts more lives in the path of the next fire.',
     difficulty: 3,
+    charge: ['Lose no more than 20 homes', 'Grow without growing the danger to the towns', 'Let the valley grow by a quarter'],
     config: {
       tenureYears: 25,
       difficulty: 'standard',
@@ -109,6 +115,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description:
       'With predators gone, deer browse every aspen shoot and willow sprout. The groves are old and not replacing themselves; the streams run straight and fast. Ranchers like it this way. The ecosystem does not.',
     difficulty: 2,
+    charge: ['Wolves living in the valley for half your tenure', 'Four beaver colonies on the creeks', 'Let the aspen come back: 30 % of stands young'],
     config: {
       tenureYears: 25,
       difficulty: 'standard',
@@ -129,6 +136,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     tagline: 'Your seed, your rules.',
     description: 'Tune the climate, history, wildlife and budget, then see what kind of valley emerges.',
     difficulty: 2,
+    charge: ['Lose no more than 12 homes', 'Cut by a third the homes a bad fire day would take', 'Hold the council’s trust at 50 or better'],
     config: {
       tenureYears: 25,
       difficulty: 'standard',
