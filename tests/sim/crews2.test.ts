@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { flatWorld, smallWorld } from '../helpers.ts';
-import { AID_MAX_TEAMS, AID_TEAM, aidFor, assignProjects, autoDispatch, crewsDaily, crewsSubstep, openEdges, requestAid } from '../../src/sim/systems/crews.ts';
+import { AID_MAX_TEAMS, AID_TEAM, SECOND_TEAM_AREA, aidFor, assignProjects, autoDispatch, crewsDaily, crewsSubstep, openEdges, requestAid, teamsOn } from '../../src/sim/systems/crews.ts';
 import { MAX_BURN_UNIT, burnCrewsNeeded, burnOutlook, createProject, createProjects, holdBurns, projectsDaily } from '../../src/sim/systems/projects.ts';
 import { KNOCKED_DOWN, fireSubstep, igniteCell, startFire, structureProtection } from '../../src/sim/systems/fire.ts';
 import { EMERGENCY_CREDIT, TANKER_LOADS_PER_DAY, TANKER_MAX_WIND, applyCommand } from '../../src/sim/commands.ts';
@@ -283,7 +283,7 @@ describe('mutual aid', () => {
     w.policies.mutualAid = 'manual';
     w.towns.push({ id: 0, name: 'Testville', x: 6, y: 25, population: 500, structures: 0, lostStructures: 0, mill: false, station: 25 * w.W + 2, firewise: 0.3, smokeToday: 0, smokeDays: 0, threat: 0, evacuated: false, growthPressure: 0, happiness: 0.5 });
     w.sub = 4;
-    const fires = [10, 25, 40].map((y) => {
+    const fires = [8, 18, 28, 38].map((y) => {
       const fe = startFire(w, y * w.W + 40, 'lightning')!;
       fe.detected = true;
       return fe;
@@ -294,6 +294,21 @@ describe('mutual aid', () => {
     expect(applyCommand(w, { t: 'aid', fireId: fires[0].id, on: false }).ok).toBe(true);
     w.economy.funds = -EMERGENCY_CREDIT + 1000;
     expect(applyCommand(w, { t: 'aid', fireId: fires[AID_MAX_TEAMS].id, on: true }).msg).toMatch(/credit/);
+    // a fire takes one team until it is a very large one; then a second, and no third
+    const big = standWithCrews(1);
+    big.policies.mutualAid = 'manual';
+    big.sub = 4;
+    const fb = startFire(big, 25 * big.W + 40, 'lightning')!;
+    fb.detected = true;
+    expect(applyCommand(big, { t: 'aid', fireId: fb.id, on: true }).ok).toBe(true);
+    expect(applyCommand(big, { t: 'aid', fireId: fb.id, on: true }).msg).toMatch(/second can be called/);
+    fb.area = SECOND_TEAM_AREA;
+    expect(applyCommand(big, { t: 'aid', fireId: fb.id, on: true }).ok).toBe(true);
+    expect(teamsOn(big, fb.id)).toBe(2);
+    expect(applyCommand(big, { t: 'aid', fireId: fb.id, on: true }).msg).toMatch(/Two teams/);
+    // sending them home sends both
+    expect(applyCommand(big, { t: 'aid', fireId: fb.id, on: false }).ok).toBe(true);
+    expect(teamsOn(big, fb.id)).toBe(0);
     // in a deep drought the whole region is burning and a team takes a day longer to come
     const dry = standWithCrews(1);
     dry.sub = 4;

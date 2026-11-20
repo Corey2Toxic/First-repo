@@ -249,6 +249,42 @@ try {
       return s.projection ? { horizon: s.projection.horizon, fire: s.projectionFire } : null;
     });
     check(proj !== null && proj.horizon === 48, 'a 48-hour spread projection is drawn for the selected fire');
+    // the player's side of an incident, through the interface
+    await page.click('.side .opt:has-text("Confine")');
+    const resp = await page.evaluate(() => {
+      const s = (window as any).fireweed;
+      return s.world.fires.find((f: any) => f.id === s.selection?.id)?.response;
+    });
+    check(resp === 'contain', 'choosing Confine changes the fire’s response');
+    await page.click('#call-aid');
+    const aid = await page.evaluate(() => {
+      const s = (window as any).fireweed;
+      return s.world.aid.filter((t: any) => t.fireId === s.selection?.id && !t.released).length;
+    });
+    check(aid === 1, 'calling a team requests one for this fire');
+    check(await page.isVisible('.side .btn:has-text("Send home")'), 'and the card offers to send it home');
+    // cut a fireline with the tool: drag beside the fire and a hand crew takes the job
+    const line = await page.evaluate(() => {
+      const s = (window as any).fireweed;
+      const w = s.world;
+      const fe = w.fires.find((f: any) => f.id === s.selection?.id);
+      const x = Math.min(w.W - 12, fe.maxX + 6),
+        y = Math.max(8, Math.min(w.H - 8, Math.round((fe.minY + fe.maxY) / 2)));
+      s.cam.centerOn(x + 0.5, y + 0.5, 12);
+      s.cam.cx = s.cam.tcx;
+      s.cam.cy = s.cam.tcy;
+      s.cam.scale = s.cam.tscale;
+      return { a: s.cam.worldToScreen(x + 0.5, y - 3.5), b: s.cam.worldToScreen(x + 0.5, y + 3.5) };
+    });
+    await page.keyboard.press('f');
+    await page.mouse.move(line.a[0], line.a[1]);
+    await page.mouse.down();
+    for (let k = 1; k <= 8; k++) await page.mouse.move(line.a[0] + ((line.b[0] - line.a[0]) * k) / 8, line.a[1] + ((line.b[1] - line.a[1]) * k) / 8);
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const lined = await page.evaluate(() => (window as any).fireweed.world.crews.filter((c: any) => c.task?.kind === 'line').length);
+    check(lined >= 1, 'dragging the fireline tool sends a hand crew to cut the line');
+    await page.keyboard.press('Escape');
   } else check(false, 'a wildfire was reported within five years (' + JSON.stringify(incident) + ')');
   await page.evaluate(() => (window as any).fireweed.select(null));
 

@@ -967,7 +967,15 @@ export const AID_TEAM: ReadonlyArray<[Crew['kind'], string]> = [
   ['heli', 'Helitack 7'],
 ];
 /** At most this many teams can be in the valley at once: the region has other fires. */
-export const AID_MAX_TEAMS = 2;
+export const AID_MAX_TEAMS = 3;
+/** A fire this large (ha) can take a second outside team: help scales with the incident. */
+export const SECOND_TEAM_AREA = 2000;
+/** Outside teams assigned to a fire and not yet sent home. */
+export function teamsOn(w: World, fireId: number): number {
+  let n = 0;
+  for (const a of w.aid) if (a.fireId === fireId && !a.released) n++;
+  return n;
+}
 
 export function aidFor(w: World, fireId: number): AidTeam | undefined {
   return w.aid.find((a) => a.fireId === fireId && !a.released);
@@ -978,7 +986,9 @@ export function aidProblem(w: World, fe: FireEvent | undefined): string {
   if (!fe || !fe.active) return 'That fire is out.';
   if (!fe.detected) return 'No one knows about that fire yet.';
   if (fe.cause === 'prescribed') return 'A prescribed burn is held by its own crews.';
-  if (aidFor(w, fe.id)) return 'A team is already assigned to that fire.';
+  const on = teamsOn(w, fe.id);
+  if (on >= 2) return 'Two teams are already assigned to that fire.';
+  if (on === 1 && fe.area < SECOND_TEAM_AREA) return `A team is already assigned to that fire (a second can be called once it passes ${SECOND_TEAM_AREA.toLocaleString('en-US')} ha).`;
   if (w.aid.filter((a) => !a.released).length >= AID_MAX_TEAMS) return 'No more teams are available: the region has other fires.';
   return '';
 }
@@ -1004,10 +1014,17 @@ export function releaseAid(w: World, team: AidTeam): void {
   for (let k = w.crews.length - 1; k >= 0; k--) if (team.crewIds.includes(w.crews[k].id)) w.crews.splice(k, 1);
 }
 
-/** Standing order: call a team when an escaped fire threatens a town (policy mutualAid 'auto'). */
+/**
+ * Standing order: call a team when an escaped fire threatens a town (policy mutualAid 'auto'), and
+ * a second when a fire with a team already working it has grown past 2,000 ha with a long open edge.
+ * (With one team a fire the valley was fighting could still take half of it: on verification seeds
+ * a third of passive First Season tenures had a year in which half the valley burned.)
+ */
 function autoAidWanted(w: World, fe: FireEvent, open: number): boolean {
   if (fe.response === 'monitor' || fe.cause === 'prescribed' || !fe.detected) return false;
   if (fe.area < 150 || open < 15) return false;
+  const first = aidFor(w, fe.id);
+  if (first) return first.arrived && fe.area >= SECOND_TEAM_AREA && open >= 40;
   return fireThreat(w, fe).dist < 45 || fe.inBuffer === true;
 }
 

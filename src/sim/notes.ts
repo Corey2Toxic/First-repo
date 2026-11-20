@@ -215,7 +215,7 @@ export const FIELD_NOTES: FieldNote[] = [
     id: 'mutual-aid',
     title: 'Calling for help',
     category: 'People',
-    body: 'When a fire outgrows the valley, an outside incident team can be called: four hand crews, two engines and a helicopter. It reports the morning after the call and bills by the day, and in a regional drought it is slower to come.',
+    body: 'When a fire outgrows the valley, an outside incident team can be called: four hand crews, two engines and a helicopter. It reports the morning after the call and bills by the day, and in a regional drought it is slower to come. A fire past 2,000 ha can take a second team. Once a fire is a major incident the state pays three quarters of the crews’ overtime.',
     tip: 'Call early or not at all: a team that arrives after the wind has dropped is money spent on mopping up. The standing order in Policies calls one automatically.',
   },
   {

@@ -173,7 +173,7 @@ function growth(w: World, factor: number): Objective {
 export function objectives(w: World): Objective[] {
   switch (w.config.scenario) {
     case 'firstseason':
-      return [keepHomes(w, 5), defensible(w, 2 / 3), goodFire(w, 0.006)];
+      return [keepHomes(w, 8), defensible(w, 2 / 3), goodFire(w, 0.006)];
     case 'tinderbox':
       return [keepHomes(w, 15), defensible(w, 0.5), severity(w, 0.3)];
     case 'afterburn':

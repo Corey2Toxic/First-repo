@@ -247,10 +247,14 @@ function apply(w: World, cmd: Command): CommandResult {
     case 'aid': {
       const fe = fireById(w, cmd.fireId);
       if (!cmd.on) {
-        const team = aidFor(w, cmd.fireId);
-        if (!team) return fail('No team is assigned to that fire.');
-        releaseAid(w, team);
-        return { ok: true, msg: 'The incident team has been sent home' + (fe ? ' from the ' + fe.name : '') + '.' };
+        // every team on the fire goes home
+        let sent = 0;
+        for (let team = aidFor(w, cmd.fireId); team; team = aidFor(w, cmd.fireId)) {
+          releaseAid(w, team);
+          sent++;
+        }
+        if (!sent) return fail('No team is assigned to that fire.');
+        return { ok: true, msg: (sent > 1 ? 'The incident teams have' : 'The incident team has') + ' been sent home' + (fe ? ' from the ' + fe.name : '') + '.' };
       }
       const problem = aidProblem(w, fe) || emergencyFundsProblem(w, COST.aidMobilize);
       if (problem || !fe) return fail(problem || 'That fire is out.');

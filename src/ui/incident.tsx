@@ -5,7 +5,7 @@
 import type { GameSession } from '../app/session.ts';
 import { FLAME_LIMIT } from '../sim/systems/fire.ts';
 import { DANGER_NAMES } from '../sim/systems/climate.ts';
-import { aidFor, aidProblem, fireThreat } from '../sim/systems/crews.ts';
+import { aidProblem, fireThreat } from '../sim/systems/crews.ts';
 import { STAGE_NAME, fireStage, stopText } from '../sim/incident.ts';
 import { objectives } from '../sim/objectives.ts';
 import type { Objective } from '../sim/objectives.ts';
@@ -146,8 +146,8 @@ export function FireView({ s, id }: { s: GameSession; id: number }) {
   const e = edgeProfile(w, fe);
   const pr = s.projection && s.projectionFire === fe.id ? s.projection : null;
   const grew = fe.area - (fe.areaYesterday ?? fe.area);
-  const aid = aidFor(w, fe.id);
-  const aidWhy = aid ? '' : aidProblem(w, fe);
+  const teams = w.aid.filter((t) => t.fireId === fe.id && !t.released);
+  const aidWhy = aidProblem(w, fe);
   const hits = pr ? pr.towns.filter((t) => t.homes > 0).sort((a, b) => a.hours - b.hours) : [];
   return (
     <div>
@@ -270,23 +270,30 @@ export function FireView({ s, id }: { s: GameSession; id: number }) {
             ))}
           </div>
           <h4 style={{ marginTop: '12px' }}>Outside help</h4>
-          {aid ? (
-            <div class="row" style={{ marginTop: '4px' }}>
+          {teams.map((t, k) => (
+            <div class="row" style={{ marginTop: '4px' }} key={k}>
               <span class="grow dim" style={{ fontSize: '12.5px' }}>
-                {aid.arrived ? `An incident team is on this fire (${money(aid.cost)} so far).` : `An incident team reports ${aid.arriveDay - w.day <= 1 ? 'tomorrow morning' : 'in ' + (aid.arriveDay - w.day) + ' days'}.`}
+                {t.arrived ? `An incident team is on this fire (${money(t.cost)} so far).` : `An incident team reports ${t.arriveDay - w.day <= 1 ? 'tomorrow morning' : 'in ' + (t.arriveDay - w.day) + ' days'}.`}
               </span>
-              <button class="btn small" onClick={() => s.command({ t: 'aid', fireId: fe.id, on: false })}>
-                Send home
+              {k === 0 ? (
+                <button class="btn small" onClick={() => s.command({ t: 'aid', fireId: fe.id, on: false })}>
+                  Send home
+                </button>
+              ) : null}
+            </div>
+          ))}
+          {teams.length === 0 || !aidWhy ? (
+            <div class="row" style={{ marginTop: '4px' }}>
+              <span class="grow faint" style={{ fontSize: '12px' }}>
+                {aidWhy || `${teams.length ? 'A second team' : 'Four hand crews, two engines and a helicopter'}, here tomorrow morning: ${money(COST.aidMobilize)} and ${money(COST.aidPerDay)} a day.`}
+              </span>
+              <button class="btn small" disabled={!!aidWhy} onClick={() => s.command({ t: 'aid', fireId: fe.id, on: true })} id="call-aid">
+                {teams.length ? 'Call a second' : 'Call a team'}
               </button>
             </div>
           ) : (
-            <div class="row" style={{ marginTop: '4px' }}>
-              <span class="grow faint" style={{ fontSize: '12px' }}>
-                {aidWhy || `Four hand crews, two engines and a helicopter, here tomorrow morning: ${money(COST.aidMobilize)} and ${money(COST.aidPerDay)} a day.`}
-              </span>
-              <button class="btn small" disabled={!!aidWhy} onClick={() => s.command({ t: 'aid', fireId: fe.id, on: true })} id="call-aid">
-                Call a team
-              </button>
+            <div class="faint" style={{ fontSize: '12px', marginTop: '3px' }}>
+              {aidWhy}
             </div>
           )}
         </>

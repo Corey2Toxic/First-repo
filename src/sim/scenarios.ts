@@ -27,7 +27,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description:
       'A healthy, patchy forest shaped by generations of natural fire. Wolves and beavers are present, the council is patient, and an advisor walks you through your first fire season. Twenty years to make your mark.',
     difficulty: 1,
-    charge: ['Lose no more than 5 homes', 'Cut by a third the homes a bad fire day would take', 'Put fire back to work: low and moderate fire on 0.6 % of the valley a year'],
+    charge: ['Lose no more than 8 homes', 'Cut by a third the homes a bad fire day would take', 'Put fire back to work: low and moderate fire on 0.6 % of the valley a year'],
     config: {
       tenureYears: 20,
       difficulty: 'gentle',
