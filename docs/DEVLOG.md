@@ -18,6 +18,7 @@ log; the milestone table reflects the current state.
 | M8 | Balancing via headless strategy simulations | done (first pass) |
 | M9 | QA, e2e, performance, docs, final build | done |
 | M10 | v1.1: remediation of the independent audit (see `REMEDIATION_REPORT.md`) | done |
+| M11 | v1.1.1: stabilization after the regression verification (save/reload fix; open issues in `NEXT_PHASE.md`) | done |
 
 ## Log
 
@@ -101,6 +102,22 @@ works on this next:
   so v1.0's bands would have given doing nothing an A; the score had to change too.
 - The QA harnesses in `scripts/qa/` take any version's `src/sim`, so v1.0 and v1.1 can be compared
   seed for seed.
+
+### v1.1.1 — stabilization
+The independent regression verification of 1.1 found one correctness defect (R1): 2 of 109 forked
+reloads changed the future. The human-ignition weights are cached and rebuilt only when the
+infrastructure or zoning counter moves, but they also depend on where houses stand; losing a house
+bumped the counter, rebuilding one did not. A long-running game therefore kept weights that a
+reloaded game recomputed differently, and one human ignition later landed on a different cell.
+Houses are now placed in one function, `placeStructure`, the counterpart of `loseStructure`, which
+bumps the counter (and so also redraws rebuilt houses on the map at once). Lessons:
+- A versioned cache is only as correct as its least careful writer. Route every change to a cache's
+  inputs through one function that bumps its counter, and test the cache against a fresh rebuild.
+- "0 diverged" from one run of a probabilistic check is weak evidence: the 1.1 report's 0 of 116 was
+  measured on an earlier commit, and the defect needs a rebuild-without-growth year followed by a
+  human ignition that lands differently. `scripts/qa/forkcheck.ts` is now a release gate.
+- The fire and ecology calibration work the verification recommends is listed, not attempted, in
+  `NEXT_PHASE.md`.
 
 ## Known limitations
 

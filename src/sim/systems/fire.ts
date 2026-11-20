@@ -916,7 +916,7 @@ export function containment(w: World, fe: FireEvent): number {
 }
 
 // ---------------------------------------------------------------- daily processes
-interface IgnitionCache {
+export interface IgnitionCache {
   version: number;
   cum: Float64Array;
   cells: Int32Array;
@@ -924,8 +924,15 @@ interface IgnitionCache {
 }
 const ignCache = new WeakMap<World, IgnitionCache>();
 
-/** Human activity weights: roads, campgrounds, recreation, town edges, logging. */
-function humanActivity(w: World): IgnitionCache {
+/**
+ * Human activity weights: roads, campgrounds, recreation, town edges, logging. The weights depend
+ * on the water, town, infra and zone layers but are rebuilt only when `dirty.infra` or `dirty.zone`
+ * moves, so every runtime change to where houses stand, to roads and campgrounds, or to zoning must
+ * bump one of them (towns.ts placeStructure/loseStructure, commands, petitions, campgrounds). A
+ * missed bump leaves a long-running game with weights a reloaded game recomputes differently
+ * (verification finding R1); tests/sim/reload.test.ts checks the two agree.
+ */
+export function humanActivity(w: World): IgnitionCache {
   const version = w.dirty.infra * 1000 + w.dirty.zone;
   const c = ignCache.get(w);
   if (c && c.version === version) return c;

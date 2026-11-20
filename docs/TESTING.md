@@ -16,6 +16,7 @@ How the game was verified, what each check covers, and what was found along the 
 | `tests/sim/water.test.ts` | A full reservoir passes its surplus down the river below the dam; the minimum release never drains storage on a dry day; sediment keeps arriving past 85 % silt. |
 | `tests/sim/score.test.ts` | A last-moment wolf release earns little wildlife credit; a valley with no fire earns nothing for fire doing its work; dredging at the end does not erase a silted record; no petitions at the final review; spending for its own sake is not rewarded. |
 | `tests/sim/economy.test.ts` | Campground petition builds a real campground; siting rules; visitor demand limits income; mill sizing, strain, reopening and survival under default play. |
+| `tests/sim/reload.test.ts` | (1.1.1, verification finding R1) After a fire year in which a town rebuilds houses without growing, the human-ignition weights a running game uses equal those a reloaded game computes, and a game reloaded at that point continues exactly like the original for 330 days; through eight years of fires, losses, rebuilding and growth the running cache matches a reload at every year end. All three fail on 1.1. |
 | `tests/sim/compat.test.ts` | A save written by the untouched v1.0 code loads, is repaired and plays on; imported policy values the game does not offer are reset. |
 | `tests/sim/society.test.ts` | The ledger accounts for every dollar; commands validate, apply and charge exactly (crew hire, zoning, roads refused into Wilderness, per-drop air-tanker cost, burns cost nothing until done, invalid commands have no side effects); petitions arise from real grievances (Silent Woods → conservationists ask for wolves); a warden below the trust threshold twice is dismissed with a scored legacy; **every scenario runs 30 years** with no non-finite values, bounded vegetation and approvals, and within a time budget. |
 | `tests/sim/review.test.ts` | The council review reports the reviewed year's income and spending (equal to the archived ledger, never $0k / $0k); year-end chronicle entries (drought, mill closure, petitions answered at the review) are filed under the closing year; "Keep playing" after the legacy report is a logged command that books any debt write-off as income, makes the skipped allocation and resets the low-trust count. |
@@ -48,6 +49,11 @@ error. Screenshots go to `test-results/phone/`.
 
 v1.1 adds `scripts/qa/`, which runs against **any version's `src/sim`** so v1.0 and v1.1 can be compared
 on identical seeds:
+
+- `scripts/qa/forkcheck.ts` — the save/reload release gate (1.1.1): plays long games, saves and
+  reloads at ~110 points (a third of them mid-fire), runs each reloaded fork 360 days and compares it
+  with the uninterrupted game (every layer, random streams, animals, crews, towns, economy,
+  politics, fires, state hash). Exits non-zero if any fork diverges.
 
 - `scripts/qa/longrun.ts` / `driver.ts` / `summarize.ts` — decades-long runs (parallel, resumable) with
   yearly fire, homes, stuck-house, wildlife, vegetation, economy and politics rows, and a summary table.

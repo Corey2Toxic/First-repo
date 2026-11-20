@@ -165,6 +165,20 @@ export function loseStructure(w: World, i: number): number {
   return tid;
 }
 
+/**
+ * The one place a home is built or rebuilt (town growth or rebuilding a ruin), the counterpart of
+ * loseStructure. Like every change to where houses stand, it bumps the infrastructure counter:
+ * caches keyed on it (the human-ignition weights in fire.ts) and the map's town texture depend on
+ * where houses are. v1.0 and v1.1 rebuilt ruins without bumping it, so a long-running game kept
+ * stale ignition weights that a reloaded game recomputed, and a reload could change which fires
+ * started (verification finding R1).
+ */
+export function placeStructure(w: World, i: number, t: Town): void {
+  w.L.town[i] = t.id + 1;
+  t.structures++;
+  w.dirty.infra++;
+}
+
 /** Yearly town growth, rebuilding and expansion into the forest edge. */
 export function townsYearly(w: World): void {
   const L = w.L;
@@ -181,8 +195,7 @@ export function townsYearly(w: World): void {
       // a ruin still held by a burning fire waits until that fire is out and has released it
       if (L.fire[i] !== FIRE.NONE) continue;
       if (r.next() < 0.55) {
-        L.town[i] = t.id + 1;
-        t.structures++;
+        placeStructure(w, i, t);
         w.spend('Other', 0);
       }
     }
@@ -242,15 +255,11 @@ function expandTown(w: World, t: Town, count: number): void {
   cands.sort((a, b) => b[0] - a[0] || a[1] - b[1]);
   for (let k = 0; k < Math.min(count, cands.length, 6); k++) {
     const i = cands[k][1];
-    L.town[i] = tid;
+    placeStructure(w, i, t);
     L.zone[i] = ZONE.NONE;
     L.shrub[i] *= 0.4;
     L.fir[i] *= 0.4;
     L.litter[i] *= 0.6;
-    t.structures++;
   }
-  if (count > 0) {
-    w.dirty.infra++;
-    w.dirty.zone++;
-  }
+  if (count > 0) w.dirty.zone++;
 }

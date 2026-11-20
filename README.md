@@ -18,7 +18,11 @@ crews dispatch when fires are reported, grass fire runs at physical speeds, deer
 bark beetles are mechanistic, the reservoir drains downstream, and the score rewards what the player
 does. What changed, why, the measurements before and after, and what is still wrong are in
 [`docs/REMEDIATION_REPORT.md`](docs/REMEDIATION_REPORT.md). Version 1.0 is preserved on the branch
-`backup/fireweed-v1.0.0-original`.
+`backup/fireweed-v1.0.0-original`, version 1.1 on `backup/fireweed-v1.1.0-opus`.
+
+**Version 1.1.1** is a stabilization release: a saved and reloaded game now always continues exactly
+like the original (a cache was not refreshed when burned houses were rebuilt). Open fire and ecology
+calibration questions for the next phase are listed in [`docs/NEXT_PHASE.md`](docs/NEXT_PHASE.md).
 
 ---
 
@@ -62,6 +66,7 @@ node scripts/fire-lab.ts                                         # fire behaviou
 node scripts/qa/firelab.ts [path/to/src/sim]                     # head/flank rates per fuel and wind
 node scripts/qa/driver.ts jobs.json outdir 4 [path/to/src/sim]   # decades-long runs, any version
 node scripts/qa/summarize.ts outdir                              # summary table of those runs
+node scripts/qa/forkcheck.ts                                     # save/reload release gate (~10 min)
 node scripts/dump-map.ts <seed> <scenario> <outdir>              # PNG maps of a generated valley
 ```
 
@@ -162,7 +167,7 @@ src/ui/         Preact UI: HUD, inspector, panels, review, screens
 src/audio/      procedural ambience (WebAudio)
 tests/          Vitest suites (tests/sim) and the Playwright end-to-end run (tests/e2e)
 scripts/        headless CLI, strategy bots, fire lab, map dumps, screenshots, single-file build
-docs/           DESIGN, ARCHITECTURE, TESTING, DEVLOG, FIRE_MODEL, REMEDIATION_REPORT
+docs/           DESIGN, ARCHITECTURE, TESTING, DEVLOG, FIRE_MODEL, REMEDIATION_REPORT, NEXT_PHASE
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for technical decisions,
