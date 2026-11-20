@@ -7,7 +7,23 @@ import type { GameConfig } from '../src/sim/world.ts';
 import { makeConfig } from '../src/sim/scenarios.ts';
 import { generateWorld } from '../src/sim/gen/index.ts';
 
-export function flatWorld(w = 60, h = 40, opts: { grass?: number; pine?: number; fir?: number; litter?: number; fm?: number; ladder?: boolean } = {}): World {
+export interface FlatOpts {
+  grass?: number;
+  pine?: number;
+  fir?: number;
+  litter?: number;
+  fm?: number;
+  ladder?: boolean;
+  /** v2 */
+  aspen?: number;
+  shrub?: number;
+  /** coarse dead fuel, t/ha */
+  dead?: number;
+  /** understory regeneration 0..1 */
+  under?: number;
+}
+
+export function flatWorld(w = 60, h = 40, opts: FlatOpts = {}): World {
   const cfg: GameConfig = { ...makeConfig('custom', 'flat-test'), width: w, height: h };
   const world = new World(cfg);
   const L = world.L;
@@ -23,9 +39,12 @@ export function flatWorld(w = 60, h = 40, opts: { grass?: number; pine?: number;
     L.fir[i] = opts.fir ?? 0;
     L.ageP[i] = 120;
     L.ageF[i] = opts.ladder ? 20 : 120;
-    L.shrub[i] = opts.ladder ? 0.4 : 0.05;
+    L.shrub[i] = opts.shrub ?? (opts.ladder ? 0.4 : 0.05);
+    L.aspen[i] = opts.aspen ?? 0;
+    L.ageA[i] = 60;
+    L.under[i] = opts.under ?? 0;
     L.litter[i] = opts.litter ?? 3;
-    L.dead[i] = 5;
+    L.dead[i] = opts.dead ?? 5;
     L.fm[i] = opts.fm ?? 0.06;
   }
   world.day = 150; // midsummer: grass cured

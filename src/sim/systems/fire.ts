@@ -125,13 +125,17 @@ export function canopyBaseHeight(ladder: number): number {
 export function crownInitiationIntensity(cbh: number, foliarMoisturePct: number): number {
   return Math.pow(0.01 * cbh * (460 + 25.9 * foliarMoisturePct), 1.5);
 }
+/**
+ * Van Wagner's critical rate for active crown fire, in cells (100 m) per hour: 3 / CBD m/min, with a
+ * canopy bulk density of 0.2 kg/m³ at full crown fuel (0.1-0.15 in a typical closed conifer stand).
+ */
+export function criticalCrownRate(canopyFuel: number): number {
+  return 9 / Math.max(0.05, canopyFuel);
+}
 /** Foliar moisture (%): lower in drought, far lower in beetle-killed red crowns. */
 function foliarMoisture(w: World, i: number, f: CellFuel): number {
   return Math.max(45, 105 - 30 * droughtSeverity(w.climate.droughtIndex) + 12 * f.green - 60 * Math.min(1, w.L.red[i] * 1.5));
 }
-/** Canopy cover dense enough to carry fire crown to crown once it is up there (active crowning). */
-export const ACTIVE_CROWN_CANOPY = 0.45;
-
 const behaviour = { flame: 0, crown: false, intensity: 0 };
 /**
  * Behaviour of a front arriving in cell i at surface rate `rs` (cells/h). `rc` > 0 means it arrives
@@ -143,8 +147,9 @@ export function frontBehaviour(w: World, i: number, f: CellFuel, rs: number, rc:
   let crown = false;
   if (f.canopy > 0.25) {
     const I0 = crownInitiationIntensity(canopyBaseHeight(f.ladder), foliarMoisture(w, i, f));
-    // torching from below, or a crown run arriving in a canopy dense enough to carry it
-    crown = Is >= I0 || (rc > 0 && f.canopy >= ACTIVE_CROWN_CANOPY);
+    // torching from below, or a crown run arriving through crowns close enough to carry it (the
+    // crown rate falls away in an open canopy: see spreadRates)
+    crown = Is >= I0 || rc > 0;
   }
   if (crown) {
     const I = byramIntensity(load + 1.1 * f.canopy, Math.max(rs, rc));
@@ -590,11 +595,15 @@ function spreadRates(env: SpreadEnv, w: World, b: number, n: number, d: number, 
     const LBc = Math.min(5, lengthToBreadth(env.windEff * 3.6, 0));
     const ec = Math.sqrt(1 - 1 / (LBc * LBc));
     const crownDamp = clamp01(1 - fm / 0.2) * (1 - 0.55 * f.green * (1 - f.grassShare));
-    Rc =
-      CROWN_SCALE * (0.1 + 0.12 * env.windEff) * crownDamp * f.canopy * Math.pow(wfHead, 0.6) * Math.pow(sf, 0.7) * ((1 - ec) / (1 - ec * cosT)) * (1 - 0.5 * L.fline[n]) *
-      // below a fresh breeze trees torch singly and in groups (passive crowning: the front keeps its
-      // surface rate); a running crown fire needs wind
-      smoothstep(4, 9, env.windEff);
+    // the rate a crown fire would run at through this canopy, at the head
+    const head = CROWN_SCALE * (0.1 + 0.12 * env.windEff) * crownDamp * f.canopy * Math.pow(wfHead, 0.6) * Math.pow(sf, 0.7);
+    // Van Wagner's (1977) second criterion: flame is sustained from crown to crown only if the fire
+    // moves fast enough for the canopy's bulk density, R >= 3 / CBD m/min. Below that, trees torch
+    // singly and in groups and the front keeps its surface rate (passive crowning). A running crown
+    // fire therefore needs both a strong wind and crowns close together: thinning a stand from a
+    // canopy of 0.75 to 0.4 cuts this ratio almost fourfold.
+    const active = head / criticalCrownRate(f.canopy);
+    Rc = head * ((1 - ec) / (1 - ec * cosT)) * (1 - 0.5 * L.fline[n]) * smoothstep(0.6, 1, active);
   }
   let k = (1 - 0.9 * L.retard[n]) * (1 - L.wet[n]);
   if (L.infra[n] & INFRA.ROAD) k *= 0.5;

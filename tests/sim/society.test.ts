@@ -45,7 +45,8 @@ describe('economy, commands and politics', () => {
     // roads are refused into wilderness
     const r = applyCommand(w, { t: 'road', from: t.station, to: cells[15] });
     expect(r.ok).toBe(false);
-    // air drop charges per 10 cells
+    // air drop charges per 10 cells (v2: the tanker flies by day; tests/sim/crews2.test.ts covers its limits)
+    w.sub = 4;
     const f1 = w.economy.funds;
     expect(applyCommand(w, { t: 'airdrop', cells: cells.slice(0, 12) }).ok).toBe(true);
     expect(f1 - w.economy.funds).toBeCloseTo(2 * COST.retardantDrop, 3);

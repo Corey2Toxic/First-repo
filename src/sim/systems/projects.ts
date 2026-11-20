@@ -187,6 +187,9 @@ export function completeProjectCell(w: World, pr: Project, cell: number, skipped
   }
 }
 
+/** Crown fuel a thinned stand is left with: too open to carry a running crown fire. */
+export const THIN_CANOPY_TARGET = 0.38;
+
 export function applyThinning(w: World, i: number): void {
   const L = w.L;
   const youngF = L.ageF[i] < 60,
@@ -196,6 +199,14 @@ export function applyThinning(w: World, i: number): void {
   L.fir[i] *= youngF ? 0.15 : 0.6;
   L.pine[i] *= youngP ? 0.35 : 0.82;
   L.aspen[i] *= 0.9;
+  // open the canopy until fire cannot run from crown to crown: fir comes out first, then pine
+  let crownFuel = L.pine[i] * 0.72 + L.fir[i];
+  if (crownFuel > THIN_CANOPY_TARGET) {
+    const cut = Math.min(L.fir[i] * 0.7, crownFuel - THIN_CANOPY_TARGET);
+    L.fir[i] -= cut;
+    crownFuel -= cut;
+  }
+  if (crownFuel > THIN_CANOPY_TARGET) L.pine[i] = Math.max(0, L.pine[i] - (crownFuel - THIN_CANOPY_TARGET) / 0.72);
   // The crew chips or piles and burns what it cuts: a little residue is left and the ladder is gone.
   // (v1.x left 10-18 t/ha of slash by default, so a thinned stand burned hotter and crowned more
   // readily for 4-10 years while counting as treated.)
