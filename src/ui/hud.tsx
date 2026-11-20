@@ -171,7 +171,7 @@ export function ToolBar({ s }: { s: GameSession }) {
 }
 
 const ZONE_DESC: Record<number, string> = {
-  [ZONE.WILDERNESS]: 'No roads or logging. Lightning fires are monitored, not fought, unless they threaten values. Conservationists love it.',
+  [ZONE.WILDERNESS]: 'No roads or logging. Lightning fires that start on a mild day are monitored, not fought (those that start at very high danger or in a wind event are fought); you can change any fire’s response. Conservationists love it.',
   [ZONE.RECREATION]: 'Draws visitors and fees — and their campfires.',
   [ZONE.TIMBER]: 'The mill harvests mature stands here each autumn. Jobs and revenue; slash and young thickets follow.',
   [ZONE.RANGE]: 'Cattle graze the grass, reducing fine fuel. Wolves and cattle do not mix.',

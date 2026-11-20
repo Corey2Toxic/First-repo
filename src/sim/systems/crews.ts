@@ -10,7 +10,7 @@
 import { DX8, DY8, astar, clamp01 } from '../grid.ts';
 import { FIRE, INFRA, SUBSTEPS_PER_DAY } from '../types.ts';
 import type { AidTeam, Crew, FireEvent, Project } from '../types.ts';
-import { COST, EMERGENCY_CREDIT, WORK } from '../economyParams.ts';
+import { COST, EMERGENCY_CREDIT, MAJOR_INCIDENT_SHARE, WORK } from '../economyParams.ts';
 import type { World } from '../world.ts';
 import { burnCrewsNeeded, burnOutlook, completeProjectCell, igniteProjectBurn, projectWorkCell } from './projects.ts';
 import { cellFuel } from './fuels.ts';
@@ -621,7 +621,10 @@ export function crewsSubstep(w: World, hooks: CrewHooks = {}): void {
 function chargeFire(w: World, fe: FireEvent | undefined, hours: number, kind: Crew['kind'], aid = false): void {
   if (aid) return; // an outside team is paid by the day (aidDaily)
   const rate = COST.suppressionHour * (kind === 'heli' ? 3.5 : kind === 'engine' ? 1.2 : 1);
-  const amt = rate * hours;
+  // A major incident is a declared emergency: the state pays three quarters of the overtime (as fire
+  // management assistance does). Without it one bad summer cost a valley its whole allocation, and
+  // the warden who had spent the reserve on thinning went bankrupt for it (a verification run did).
+  const amt = rate * hours * ((fe?.stage ?? 0) >= 2 ? MAJOR_INCIDENT_SHARE : 1);
   w.spend('Suppression', amt);
   if (fe) fe.cost += amt;
 }

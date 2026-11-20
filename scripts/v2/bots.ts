@@ -8,7 +8,8 @@
  *
  * Strategies
  *   passive   refuses every petition and does nothing else
- *   firefight hires two more hand crews and a helicopter, builds lookouts, flies air patrol; no treatment
+ *   firefight hires one more hand crew, builds lookouts, flies air patrol; no treatment (what the
+ *             budget sustains: two crews and a helicopter went bankrupt in year 8)
  *   steward   lookouts, one more hand crew, the firewise code; every year thins the ground nearest
  *             homes and burns the fireshed beyond it, choosing ground by the Fireshed and Bad-day
  *             fire lenses (the same information the player has); wilderness in the remote high country
@@ -146,8 +147,6 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
   const sim = new Simulation(w);
   if (strat === 'firefight') {
     applyCommand(w, { t: 'hire', kind: 'hand' });
-    applyCommand(w, { t: 'hire', kind: 'hand' });
-    applyCommand(w, { t: 'hire', kind: 'heli' });
     applyCommand(w, { t: 'policy', key: 'airPatrol', value: true });
     buildLookouts(w, 2);
   } else if (strat === 'steward') stewardSetup(w);
@@ -163,6 +162,12 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
   sim.hooks.onEnd = ((prev) => (fe) => {
     if (prev) prev(fe);
     if (fe.cause !== 'prescribed' && fe.cause !== 'pile') fires.push({ area: fe.area, days: fe.outDay - fe.startDay, homes: fe.structuresLost });
+    // FW_FIRES=1: list the fires that mattered (stderr)
+    if (process.env.FW_FIRES && (fe.area >= 300 || fe.structuresLost > 0))
+      console.error(
+        '  y' + (Math.floor(fe.startDay / 360) + 1) + ' d' + (fe.startDay % 360) + ' ' + fe.name + ' [' + fe.cause + ', ' + fe.response + '] ' + fe.area + ' ha in ' + (fe.outDay - fe.startDay) + ' d, ' + fe.structuresLost + ' homes, ' +
+          Math.round((100 * fe.highSeverity) / Math.max(1, fe.area)) + '% severe, cost $' + Math.round(fe.cost / 1000) + 'k, funds $' + Math.round(w.economy.funds / 1000) + 'k',
+      );
   })(sim.hooks.onEnd);
   let treatSpend = 0;
   const onReview = (ww: World) => {
@@ -176,7 +181,8 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
   };
   while (!w.outcome.ended && w.yearsElapsed < years + 0.01) {
     if (strat === 'steward') {
-      const reserve = 220_000;
+      // a warden keeps a fire-season reserve: a bad summer costs several hundred thousand
+      const reserve = 450_000;
       // burns are planned in late winter and at summer's end, thinning in autumn
       if (w.doy === 20 || w.doy === 235) treatSpend += stewardTreat(w, 'burn', Math.max(0, (w.economy.funds - reserve) * 0.3));
       if (w.doy === 280 || w.doy === 60) treatSpend += stewardTreat(w, 'thin', Math.max(0, (w.economy.funds - reserve) * 0.55));

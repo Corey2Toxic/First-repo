@@ -1,154 +1,235 @@
-# Fireweed — Fire behaviour model (v1.1)
+# Fireweed — Fire behaviour model (v2.0)
 
-This note documents the surface-spread model introduced in v1.1, the evidence behind it, every
-calibration choice, and how to re-measure it. It replaces the v1.0 formulation that the independent
-audit found to run cured grass "one to two orders of magnitude below physical rates" and slower than
-crown fire.
+This note documents how fire behaves in FIREWEED 2.0, what was wrong with it in 1.1.1, the evidence
+for each change, every calibration choice, and how to re-measure it. Each measurement names the
+harness that produced it; all of them run on any source tree (`FW_ROOT=<checkout> node scripts/v2/…`),
+so the 1.1.1 column of every table can be reproduced from the preserved branch
+`backup/fireweed-v1.1.1-stable`.
 
-## What was wrong in v1.0
+The surface rate-of-spread formulas of v1.1 (CSIRO grassland, Rothermel-type shrub and litter rates
+on a wind ellipse, a 16-direction stencil, Erlang crossing times) were sound and are kept. What
+changed is everything that happens to a fire after its first three hours.
 
-| Measured (fire lab, 3-h afternoon step, 6 % dead fuel moisture) | v1.0 | Published reference |
+## 1. What was wrong in 1.1.1
+
+Measured on the 1.1.1 tree with the harnesses in `scripts/v2/`:
+
+| Finding | Evidence |
+|---|---|
+| Fires lasted a day. 45 of 49 Tinderbox wildfires were out within one day in 12 years; none reached 1,000 ha; no homes were lost. With no crews at all the largest fire was 796 ha. | `regime.ts tinderbox <seed> 12 [nodispatch]` |
+| **Root defect: spread progress was thrown away at every 3-hour step.** A front that needed more than three hours to cross a cell never arrived. Realised / specified head rate: pine litter 0.79 at 6 m/s, 0.27 at 3 m/s, 0.05 at 1 m/s; fir litter 0; all litter at night 0. | `slowspread.ts` |
+| Intensity was a proxy of fuel load and dryness, blind to rate of spread and direction: flanks "burned" as hot as the head, a fast grass fire was workable on every edge, and crown fire was decided by load. | `fire.ts` (v1.1), `firetrace.ts` |
+| Putting a cell out did not stop it spreading during that step. | `crews.ts` `extinguish` (v1.1) |
+| Nothing in a generated "Tinderbox" valley could torch, even at 12 m/s: a stand was one mean age per species, so a century of ingrowth under old trees read as an old stand. | `fuels.ts tinderbox <seed> 0` |
+| Storm days raised the whole day's wind to 5–11 m/s, and every new fire ran at its full rate from its first minute. Unnoticed while nothing spread; once fire moved as specified, fires were 50–190 ha when first reported on a windy day and none was caught at high danger (0 of 11). | `attack.ts tinderbox cal-a 10` |
+| A town a fire reached lost nearly every home whether or not the ground beside it was treated or the homes hardened (12-home town, westerly design day: untreated thicket 11.9 lost, thinned and burned 11.0). | `project.ts homes` (before the change) |
+
+## 2. The model
+
+### 2.1 Spread that keeps its place
+
+Each burning cell draws a crossing time into each of 16 neighbouring directions (Erlang, shape 8,
+mean = distance / rate). A crossing that does not finish inside the step is **kept**: the target
+cell records the fraction covered (layer `fprog`) and the front continues from there next step.
+Progress is committed at the end of a step (so several sources do not add up) and forgotten when
+nothing is burning. Realised / specified head rate is now 1.1–1.5 everywhere including fir litter
+and at night (the excess is first-passage over competing paths, largest in near-calm conditions).
+
+### 2.2 Intensity in physical units
+
+* Byram's fireline intensity `I = H · w · R` with `H` = 18,000 kJ/kg, `w` the fine fuel consumed in
+  the front (kg/m², saturating above 0.6) and `R` the rate at which the front actually arrived or is
+  now moving.
+* Flame length: Byram (1959) `L = 0.0775 · I^0.46` for surface fire, Thomas (1963)
+  `L = 0.0266 · I^(2/3)` for crown fire. The layers `fint` and `fpeak` hold **flame length in metres**.
+* Because the rate depends on direction, so does the flame. Measured at 8 m/s on an established
+  fire: pine litter 1.2 m at the head, 1.1 m on the flanks, 0.7 m at the heel; cured grass 2.4 m,
+  1.9 m and 0.5 m. (A flank cell with unburned fuel downwind of it is a small head in its own right,
+  which is why flanks are only a little lower.) The heel and the night are where crews get in.
+* Direct-attack limits by flame length: hand crews 1.2 m, engines 2.4 m, aircraft 3.4 m
+  (`FLAME_LIMIT`; the standard 4 ft / 8 ft / 11 ft fire-suppression interpretation classes).
+* Severity from the peak flame of the burn: crown fire → high; ≥ 1.5 m (halved weight for grass) →
+  moderate; else low.
+
+Reference beds, established fire, 7 % dead fuel moisture, mean head rate over the twelve hours from
+noon (afternoon and evening), 10-m wind 8 m/s (`project.ts lab`, measured before the build-up rule
+of 2.6 was added):
+
+| Fuel bed | Head rate | Published reference (at the mid-flame wind) |
 |---|---|---|
-| Cured grass, 6 m/s wind | 19–40 m/h | ~1–8 km/h (CSIRO grassland; GR1–GR2 ~0.5–1.6 km/h) |
-| Long-needle pine litter, 6 m/s | 5–19 m/h | ~50–150 m/h (fuel model 9 at the corresponding mid-flame wind) |
-| Dense young fir (crown fire), 12–15 m/s | 1.1–1.8 km/h | ~0.9–4 km/h (Stocks et al. 2004; Rothermel 1991) |
-| Fuel ordering | crown > grass ≈ litter | grass > shrub ≈ crown > litter |
+| Cured grass (open) | 910 m/h | GR2 / FM1: 1–2 km/h |
+| Shrub | 180 m/h | FM5: 300–400 m/h |
+| Open pine, needle litter | 70 m/h | FM9: 100–150 m/h at 5 mph mid-flame |
+| Pine + grass understory | 130 m/h | FM2: 400–700 m/h |
+| Closed fir, short needles | 8 m/h | FM8: 20–40 m/h |
+| Suppressed mixed thicket (understory 0.85) | 62 m/h, torching | FM10: 50–60 m/h at the 2–3 mph mid-flame wind a closed canopy leaves |
+| Aspen, leaf litter | 26 m/h | slow; a natural fuel break |
 
-Root causes, both structural rather than parametric:
+The game's rates sit at or below the published ones for open fuels because of the heterogeneity
+factors `KE_GRASS` 0.2, `KE_SHRUB` 0.5, `KE_LITTER` 0.6 (a hectare is never one continuous bed),
+which are unchanged from v1.1.
 
-1. **Rate was tied to fuel load.** `R0 ∝ smoothstep(0.5, 6, fine)` meant light, fast grass
-   (≤ 2.6 t/ha) ran at a third of its nominal rate while heavy litter ran at full rate. In the
-   fire-behaviour literature rate of spread depends mainly on fuel *type* (particle fineness, bed
-   structure) and wind; load mostly sets intensity.
-2. **Exponential cell-crossing times.** The stochastic minimum-travel-time scheme drew each
-   cell-to-cell crossing time from an exponential distribution. With many competing paths, the
-   first-passage front then runs much faster than the specified rate — measured here at 3.7× in
-   calm conditions and ~1.2× in strong wind — so the model's "rates" were not rates. (The v1.0 crown
-   formula had been tuned to the observed front speed, so it looked right.)
+### 2.3 Crown fire
 
-## The v1.1 formulation (`src/sim/systems/fire.ts`)
+* **Initiation** (Van Wagner 1977): the stand torches when surface intensity exceeds
+  `(0.01 · CBH · (460 + 25.9 · FMC))^1.5`. Canopy base height follows ladder fuel,
+  `CBH = 0.5 + 9 · (1 − ladder)³` m (9 m in open old pine, half a metre in a thicket); foliar
+  moisture falls with drought and collapses in beetle-killed crowns.
+* **Active crown runs** need Van Wagner's second criterion: the crown rate must reach
+  `3 / CBD` m/min. With the canopy at full fuel taken as 0.2 kg/m³ this is 9 / canopy cells per hour;
+  a run ramps in between 60 % and 100 % of it. Open stands torch tree by tree but do not run.
+  (An earlier 2.0 build used a canopy-cover threshold of 0.45 and two ad-hoc wind ramps; a thinned
+  block still crowned over 80 % of its area. Replaced.)
+* A crowning cell is a source of crown runs for the step it arrives in and the next; then its canopy
+  is gone and what is left is a surface fire a crew can approach.
 
-Head-fire rate of spread for a cell, dry and on flat ground, weighted by each component's share of
-the fine fuel:
+### 2.4 The understory
 
-| Component | Model | Source |
+New state variable `under` (0–1): saplings and pole thickets beneath or between the big trees.
+
+* It grows where fire stays away (about 0.115 per year on a good site, slower under browsing and
+  grazing, with self-thinning), and is generated from each cell's time since fire or treatment.
+* It is the main ladder fuel (up to 0.65 of ladder continuity) and it lifts and aerates the litter
+  bed: a full understory multiplies the litter rate by 2.4 (fuel model 10 against 8 and 9).
+* Low-severity fire removes three quarters of it, moderate fire nearly all; thinning removes 90 %.
+  It is back in 10–15 years unless fire returns.
+
+This is the mechanism of the fire paradox that 1.x lacked. In a generated Tinderbox valley 75 % of
+wooded land torches at a 6 m/s wind on a dry afternoon (16 % in First Season); in 1.1.1, 0 %.
+(`fuels.ts`)
+
+### 2.5 Day and night; fires that last
+
+* Each component of the fuel bed answers to its own moisture of extinction (grass 15 %, shrub 25 %,
+  litter 28 %), including the extra heat needed to bring damp fuel to ignition. Mixed beds spread at
+  the share-weighted **geometric** mean of their components (arithmetic weighting let a sixth of
+  cured grass carry a needle bed at three times the needle rate and burned 50–90 % of a valley a
+  year in trials; abandoned).
+* Night humidity recovery adds up to 6 points of fuel moisture after dark, less in drought and almost
+  none under a dry downslope wind.
+* A cell is an **advancing front** while its best outgoing rate is at least 3 m/h; its flame follows
+  the rate it is making now. Otherwise it **holds**: it creeps at 15 % vigour and stays alight for
+  hours to days in heavy fuel and duff (4 h + litter + coarse fuel, more in drought, up to 96 h), and
+  may flare up again on a dry, windy afternoon.
+* The wind swings ±0.3 rad through the day around its mid-afternoon direction (±0.1 in a wind
+  event), so a fire fans out.
+* A cell crews have knocked down does not spread.
+
+Result: fires of 1,000 ha or more last 5–16 days and do most of their growth on a few bad days.
+
+### 2.6 The first hours
+
+* A fire starts as a point. In its first 3-hour step it runs at 0.35 of the rate its fuel and wind
+  would give a line of fire, in its second at 0.7, unless it is already 6 ha (Cheney & Gould 1995:
+  rate of spread depends on head-fire width). Flames are shorter for it. This is the window in which
+  initial attack catches most fires.
+* Storm outflow raises the day's wind to 3.5–8 m/s, not 5–11.
+* Detection: lookouts, residents, passers-by, air patrol, and a smoke column that is likely to be
+  seen once a fire is a few hectares.
+
+### 2.7 Houses
+
+A house catches from a burning neighbour cell with probability per 3-hour step
+`min(0.35, 0.014 · L^2.4) · (1 − 0.6 · grass share) · (1 − 0.75 · firewise) · (1 − engine protection)`
+with `L` the neighbour's flame length. A front passing a house exposes it about six times. Unhardened
+homes lost: ~2 % at 0.5 m flames, ~8 % at 1 m, ~20 % at 1.5 m, ~55 % at 2.5 m, ~90 % under crown fire.
+House-to-house ignition needs wind (`0.03 + 0.012 · wind`).
+
+Twelve-home town, a fire front 1.2 km upwind, westerly design day, mean of 12 runs
+(`project.ts homes`):
+
+| Ground around the town | Homes lost (simulation) | Fireshed's estimate |
 |---|---|---|
-| Cured grass | `1000 · grassHeadRateKmh(U10)` m/h, with U10 reduced under canopy | CSIRO grassland model, Cheney, Gould & Catchpole (1998) |
-| Shrub | `40 · (1 + 0.85 · Umid^1.4)` m/h, Umid in mph | fitted to Anderson (1982) fuel model 5 |
-| Litter | `r0 · (1 + 0.55 · Umid^1.4)` m/h, `r0` = 6 (fir/spruce) … 24 (long-needle pine), halved for aspen leaf litter | fitted between fuel models 8 and 9 |
+| Untreated thicket | 11.1 | 11.2 |
+| Untreated thicket, firewise 0.9 | 6.5 | 6.8 |
+| Thinned and underburned within 400 m | 3.2 | 2.4 |
+| Treated and firewise | 1.0 | 0.8 |
+| Open pine litter | 2.1 | 2.5 |
+| Cured grass | 5.8 | 7.9 |
 
-* Mid-flame wind `Umid = U10 · WAF`, with the wind adjustment factor falling from 0.4 in the open to
-  0.12 under a closed canopy.
-* Continuity: `smoothstep(0.3, 2.0, fine t/ha)` — sparse fuel does not carry fire.
-* Moisture: Rothermel's damping polynomial with extinction moisture 15 % (grass) to 28 % (litter),
-  as in v1.0.
-* Slope: unchanged (`exp(3.2 tanφ)` upslope).
-* Direction: the head rate is distributed on an ellipse, `R(θ) = R_head (1 − e)/(1 − e cos θ)`,
-  whose length-to-breadth ratio grows with wind (Alexander 1985 for forest fuels, Cheney & Sullivan
-  for grass, blended by grass share, capped at 8:1).
-* Spread uses a 16-direction stencil (the 8 neighbours plus the 8 knight moves, at most 26.6°
-  apart); a knight move needs both cells it crosses to carry fire and never lands on a road or fuel
-  break. Each direction takes the ellipse's rate at its angle from the wind less half the gap to its
-  neighbouring directions, so a head fire pointing between two directions still runs at ≥ 97 % of its
-  rate. (The first v1.1 build evaluated the ellipse on 8 neighbours only: with the wind at 22.5° a
-  grass head fire ran at ~25 % of its on-axis distance. The auditor's anisotropy harness found it;
-  see below.)
-* Cell crossing times are Erlang(8) with the specified mean, so the simulated front advances close
-  to the specified rate in every direction while keeping enough roughness to hide the stencil's
-  polygonal bias (calm-wind axis/diagonal ratio 0.99 in the fire lab).
-* Crown fire: v1.0's head-rate formula, scaled by `CROWN_SCALE = 3.0` and distributed on a wind
-  ellipse (length-to-breadth from Alexander 1985, capped at 5:1). v1.0's lateral crown rate also grew
-  with wind, so its crown fires were nearly circular and burned ~4–5× the area of a real crown run of
-  the same head speed; the scale keeps head speeds in the observed range under Erlang(8) times.
+### 2.8 Barriers and tools
 
-### Effective-rate factors (calibration, not physics)
+* Roads and fuel breaks hold a surface front unless wind or flame length carries it across
+  (chance per attempt from 0.02 % for a calm, cool edge to tens of percent for a wind-driven head).
+* Fireline holds flames up to about 2 m and fails by 4.5 m; it weathers away in a few weeks.
+* Embers come from flames over 2.5 m, crown fire and burning houses, travel with the wind and need
+  dry fine fuel where they land.
+* The air tanker flies in daylight, below 13 m/s of wind, six loads a day.
 
-A 1-ha cell cannot represent rock, bare ground, green swales, trails, partial curing or broken
-litter. Three explicit factors account for that:
+## 3. Projections (`src/sim/projection.ts`)
 
-| Factor | Value | Justification |
-|---|---|---|
-| `KE_GRASS` | 0.2 | CSIRO is calibrated on continuous pasture; mountain bunchgrass is sparser — comparable to Scott & Burgan GR1–GR2 dry-climate grass (~0.5–1.6 km/h at a 6–7 mph mid-flame wind). |
-| `KE_SHRUB` | 0.5 | Patchy shrub cover. |
-| `KE_LITTER` | 0.6 | Litter beds are broken by logs, rock and green patches. |
+The projection and the fireshed are computed from the same rate functions the simulation uses
+(`cellTerms`, `surfaceRunRate`, `crownRunRate`, `roadBreachChance`, `arrivalBehaviour`), as
+expected-travel-time searches over the same 16-direction stencil. They leave out what the
+simulation leaves to chance (spotting, the luck of a road, flare-ups) and anything crews do. They
+draw no random numbers and change no state.
 
-Sensitivity (20-year medium-map runs, default management): with `KE_GRASS = 0.35` and v1.0's
-saturated drought index, grass valleys burned 11–32 %/yr — far outside any plausible regime — which
-is what exposed the drought-index and suppression problems below. Final values were chosen against
-published fuel-model rates, not against burned-area targets. (Those sensitivity runs predate the
-16-direction stencil, so they understated spread in off-axis winds; the landscape table below was
-re-measured after it.)
+* **Against the simulation on uniform fuel** (`project.ts lab`): projected head distance within a
+  cell or two of the simulated mean on all seven reference beds at 3 and 8 m/s; projected area
+  within about 20 %.
+* **Against real fires** (`project.ts skill tinderbox cal-a 8`, 30 fire-days, crews working):
+  actual / projected new area over 24 hours: median 1.14 (10th–90th percentile 0.29–1.38); 76 % of
+  what burned was inside the projected area (median), and 83 % of the projected area burned. Two of
+  the 30 were outright misses (the weather did something the forecast did not say).
+* **Cost**: 3–26 ms per 24-hour projection of a real fire; 160–330 ms for the firesheds of a
+  medium valley.
+* **Forecast** (`src/sim/forecast.ts`): weather has its own random stream, so the forecaster
+  generates the days that will actually come on a copy and publishes them through a noisy channel
+  whose skill falls with lead time (0.96, 0.88, 0.78, 0.68, 0.58). Measured over 1,200 fire-season
+  days per lead: the forecast danger class is exact 86–96 % of the time and within one class
+  99–100 %.
 
-## Fire lab results (v1.1)
+The **design day** for firesheds and town exposure is late summer (grass cured), drought severity
+0.7, and four winds: the valley's dry downslope wind at 12 m/s with 5 % fuel moisture, and a 7 m/s
+westerly swinging a little either way at 6 %.
 
-`node scripts/qa/firelab.ts` (16 replicate fires per point; head and flank distance after one
-3-hour step at 15:00, fine dead fuel moisture 6 %):
+## 4. Regime
 
-| Fuel | U = 3 m/s | U = 6 m/s | U = 12 m/s | U = 15 m/s |
+Passive default management (no player actions, petitions refused, automatic dispatch and outside
+teams), medium valleys, calibration seeds `cal-a…d`, 20 years (`batch.ts 20 a,b,c,d …`):
+
+| | 1.1.1 Tinderbox | 2.0 Tinderbox | 2.0 First Season | 2.0 Boomtown |
 |---|---|---|---|---|
-| Cured grass (head) | 0.72 km/h | 1.36 km/h | 2.49 km/h | 3.05 km/h |
-| Shrubland | 158 m/h | 310 m/h | 606 m/h | 790 m/h |
-| Open pine, long-needle litter | 48 m/h | 98 m/h | 240 m/h | 300 m/h |
-| Dense young fir (crowning) | 96 m/h | 240 m/h | 0.98 km/h | 1.59 km/h |
+| Fires held under 10 ha | see report | 59 % | 67 % | 60 % |
+| Fires of 1,000 ha or more | 0 | 5.8 | 1.3 | 4.8 |
+| Burned per year | see report | 2.9 % | 0.63 % | 3.6 % |
+| Worst year | see report | 35 % | 7 % | 45 % |
+| High-severity share | see report | 42 % | 18 % | 46 % |
+| Homes lost | 0 | 17.5 | 0 | 30.5 |
+| Longest fire | 1–2 days | 12 days | 6 days | 13 days |
 
-(U is the 10 m wind; the afternoon diurnal factor raises it by ~26 % at 15:00.) Run
-`node scripts/qa/firelab.ts <path-to-v1.0/src/sim>` to reproduce the v1.0 column of the table above.
+(The 1.1.1 column and the measurements with player strategies are in `docs/V2_REPORT.md`.)
 
-Grid orientation (auditor's `exp_j2_aniso`, head distance along the wind after one afternoon step,
-24 fires per point, wind at 0° / 22.5° / 45° to the grid):
+## 5. How to re-measure
 
-| | v1.0 | v1.1, 8-direction ellipse (superseded) | v1.1 |
-|---|---|---|---|
-| Grass, 9 m/s | 9.5 / 11.1 / 11.4 cells | 129 / 33 / 131 | 130 / 151 / 150 |
-| Dense fir, 14 m/s | 55.5 / 55.4 / 55.5 | 44 / 20 / 44 | 48 / 55 / 56 |
+```bash
+node scripts/v2/slowspread.ts                      # does a slow fire arrive at its specified rate?
+node scripts/v2/project.ts lab                     # projection against simulation, uniform fuel
+node scripts/v2/project.ts skill tinderbox cal-a 8 # projection against real fires
+node scripts/v2/project.ts shed tinderbox cal-a    # firesheds, and what treatment does to them
+node scripts/v2/project.ts homes                   # homes lost against the fireshed's estimate
+node scripts/v2/fuels.ts tinderbox cal-a 20        # what a valley's fuels would do, through time
+node scripts/v2/attack.ts tinderbox cal-a 10 --all # why initial attack succeeds or fails
+node scripts/v2/regime.ts tinderbox cal-a 20       # one valley's fire regime
+node scripts/v2/batch.ts 20 a,b,c,d tinderbox,firstseason,boomtown
+FW_ROOT=<1.1.1 checkout> node scripts/v2/batch.ts 20 a,b,c,d tinderbox   # the same on 1.1.1
+```
 
-(v1.0's grass numbers are small because its grass ran 1–2 orders of magnitude too slowly.)
+## 6. Limits and uncertainty
 
-## Consequences that had to be corrected with it
-
-Physically faster surface fire exposed three other unrealistic parts of the fire pipeline; they were
-fixed on their own merits, and the landscape was re-measured after each:
-
-1. **Drought index (audit D9).** The v1.0 index sat at its 1.0 ceiling every summer, so every summer
-   behaved like a severe drought (dry lightning ~70 % of storms in every year type). It is now the
-   Keetch–Byram drought index (KBDI/800), and its consumers read a normalised `droughtSeverity`.
-   Summer severity now averages 0.75 in drought years and 0.23 in very wet years; the dry-lightning
-   share follows (0.66 → 0.30).
-2. **Initial attack (audit D3).** Crews are dispatched in the step a fire is reported and travel at
-   realistic speeds; engines can drive open grassland and work along a grass fire's edge.
-3. **Ignition timing.** A new fire now starts at a random moment inside its 3-hour step instead of
-   receiving a full three hours of spread before anyone can see it.
-
-Also corrected: the Simard/NFDRS equilibrium-moisture regressions now receive °F as they are defined
-(audit D19; fuels read 0.5–1 point drier).
-
-## Landscape outcome (default management, 50 years)
-
-Same seeds for both versions (`scripts/qa/driver.ts`, petitions refused, no player actions):
-
-| | v1.0 | v1.1 |
-|---|---|---|
-| Tinderbox burned (5 runs, one a large map) | 1.7–4.5 %/yr | 1.4–5.7 %/yr; quiet first decades, rising later (decade 4 reached 15 %/yr on one seed) |
-| Tinderbox high-severity share | 12–16 % | 4–9 % |
-| Tinderbox homes lost | 25–72, plus up to 41 fireproof stuck houses (D1) | 22–117 |
-| Boomtown (medium / small) | 2.5 / 4.7 %/yr, 44 / 88 homes | 5.2 / 2.4 %/yr, 242 / 31 homes |
-| First Season (2 runs) | 1.7–2.7 %/yr | 0.6–0.7 %/yr |
-
-The fire paradox emerges from mechanisms: effective suppression keeps early fires small, fuel hazard
-and warming accumulate, and the fires that escape on wind-event days are larger. Two further
-feedbacks now operate: repeated fire converts shrubland to grass (shrub cover 0.26 → 0.05–0.10 over
-50 years in the most-burned runs), and grass carries fast fire. In Boomtown, whose towns grow into
-the forest, a decade of such fires cost 157 homes on one seed under default management. Fire is less
-severe than in v1.0 because most of the extra area is fast, low-intensity grass fire.
-
-## Limits and uncertainty
-
-* Published reference rates are approximate and come from other ecosystems (Australian pasture,
-  US fuel models); the KE factors carry most of the uncertainty.
-* Rate depends on a daily wind speed and direction with a diurnal cycle; real wind shifts within a
-  day are not modelled.
-* Fire intensity (used for crowning, severity, spotting and crew safety) is still v1.0's
-  load-and-dryness proxy, not Byram intensity from the new rates; fast grass fires therefore remain
-  "workable" by crews on every edge, which overstates what crews can do at the head of a running
-  grass fire.
-* The 3-hour step cannot resolve the first hour of initial attack.
+* Reference rates come from other ecosystems (Australian pasture, US fuel models); the `KE` factors
+  carry most of the uncertainty, as in v1.1.
+* The 3-hour step is coarse for the first hour of a fire. The build-up rule stands in for
+  acceleration from a point, detection and travel that all happen inside one step.
+* Crews act once per step, after the fire has moved. Backfiring and burning out are not modelled.
+* The projection assumes every burning edge is awake; for a fire lying down at night it shows what
+  the fire can do when the day warms, which is how it is labelled.
+* Spotting is in the simulation and not in the projection: on big run days the projection
+  under-predicts area by 20–35 %.
+* Thinning opens a stand to the wind, so a surface fire crosses thinned and burned ground no slower
+  than it crossed the thicket. What treatment changes is the kind of fire (on the ground, 1 m
+  flames, low severity) and therefore what crews and houses can survive. This is deliberate and is
+  what the literature reports; it is also why a treated block without a crew on it does not stop a
+  fire.
+* Grid anisotropy of 8–18 % in head distance between axis and off-axis winds remains (v1.1 finding).
+* Smoke, ember density and house-to-house spread are simple; evacuation is not modelled.

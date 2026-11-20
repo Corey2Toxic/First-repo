@@ -69,7 +69,10 @@ export function defaultResponse(w: World, i: number, cause: FireCause): FireResp
   const z = w.L.zone[i];
   if (z === ZONE.BUFFER) return 'suppress';
   const d = nearestStructureDist(w, i % w.W, (i / w.W) | 0);
-  if (z === ZONE.WILDERNESS && d > 16) return 'monitor';
+  // Wilderness policy: a lightning fire is left to do its work when the day allows it. (v1.x
+  // monitored every wilderness fire whatever the weather, harmless while fires died in a day; a
+  // fire now lives for weeks, and one left alone in August at very high danger takes the valley.)
+  if (z === ZONE.WILDERNESS && d > 16 && cause === 'lightning' && w.weather.dangerClass <= 2 && !w.weather.windEvent) return 'monitor';
   return 'suppress';
 }
 

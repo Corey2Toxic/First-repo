@@ -26,6 +26,8 @@ export const COST = {
   aidPerDay: 20_000, // the valley's share per day the team is assigned
 };
 
+/** The valley's share of crew overtime on a major incident (the state pays the rest). */
+export const MAJOR_INCIDENT_SHARE = 0.25;
 /** How far into debt emergency fire spending may take the service before the county stops paying. */
 export const EMERGENCY_CREDIT = 400_000;
 

@@ -247,7 +247,10 @@ export function FireView({ s, id }: { s: GameSession; id: number }) {
           {fe.structuresLost}
         </span>
         <span class="k">Cost so far</span>
-        <span class="v">{money(fe.cost)}</span>
+        <span class="v" title={stage >= 2 ? 'A major incident is a declared emergency: the state pays three quarters of crew overtime.' : 'Crew overtime, air drops and outside teams. If this becomes a major incident the state pays three quarters of the overtime.'}>
+          {money(fe.cost)}
+          {stage >= 2 ? ' (state pays ¾ of overtime)' : ''}
+        </span>
         <span class="k">Reported by</span>
         <span class="v">{fe.detectedBy || '—'}</span>
       </div>

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { established, flatWorld, smallWorld } from '../helpers.ts';
 import type { FlatOpts } from '../helpers.ts';
-import { applyFireEffects, fireSubstep, startFire } from '../../src/sim/systems/fire.ts';
+import { applyFireEffects, defaultResponse, fireSubstep, startFire } from '../../src/sim/systems/fire.ts';
 import { applyThinning } from '../../src/sim/systems/projects.ts';
 import { crewsDaily, crewsSubstep, requestAid } from '../../src/sim/systems/crews.ts';
 import { makeCrew } from '../../src/sim/gen/crews.ts';
@@ -20,7 +20,7 @@ import { decodeWorld, encodeWorld, stateHash } from '../../src/sim/save.ts';
 import { evaluateLegacy } from '../../src/sim/score.ts';
 import { councilMonthly } from '../../src/sim/systems/council.ts';
 import { COST, EMERGENCY_CREDIT } from '../../src/sim/economyParams.ts';
-import { FIRE, INFRA } from '../../src/sim/types.ts';
+import { FIRE, INFRA, ZONE } from '../../src/sim/types.ts';
 import type { FireEvent, StopCause, Town } from '../../src/sim/types.ts';
 import type { World } from '../../src/sim/world.ts';
 import { Rng } from '../../src/sim/rng.ts';
@@ -380,7 +380,51 @@ describe("the council's charge", () => {
   });
 });
 
+describe('wilderness policy', () => {
+  it('leaves a lightning fire alone only when it starts on a day that allows it (1.1.1: always)', () => {
+    const w = flatWorld(80, 60, PINE);
+    addTown(w, 5, 5, [[5, 5]]);
+    const cell = 40 * w.W + 60;
+    w.L.zone[cell] = ZONE.WILDERNESS;
+    w.weather.dangerClass = 1;
+    w.weather.windEvent = false;
+    expect(defaultResponse(w, cell, 'lightning')).toBe('monitor');
+    expect(defaultResponse(w, cell, 'human')).toBe('suppress');
+    w.weather.dangerClass = 3;
+    expect(defaultResponse(w, cell, 'lightning')).toBe('suppress');
+    w.weather.dangerClass = 1;
+    w.weather.windEvent = true;
+    expect(defaultResponse(w, cell, 'lightning')).toBe('suppress');
+    // outside the wilderness every fire is fought
+    w.weather.windEvent = false;
+    expect(defaultResponse(w, cell + 1, 'lightning')).toBe('suppress');
+  });
+});
+
 describe('mutual aid and money', () => {
+  it('the state pays three quarters of crew overtime on a major incident', () => {
+    const cost = (stage: 0 | 2) => {
+      const w = flatWorld(80, 50, PINE);
+      w.weather.windSpeed = 2;
+      w.climate.droughtIndex = 0.2;
+      w.rng.fire = new Rng('share');
+      w.crews.push(makeCrew(w, 'hand', 25 * w.W + 28, 'Crew'));
+      const fe = startFire(w, 25 * w.W + 30, 'human')!;
+      fe.detected = true;
+      fe.detectedDay = w.day;
+      fe.stage = stage;
+      w.L.ftime[25 * w.W + 30] = 48;
+      crewsDaily(w);
+      for (let s = 0; s < 3; s++) crewsSubstep(w);
+      return fe.cost;
+    };
+    const local = cost(0),
+      major = cost(2);
+    expect(local).toBeGreaterThan(1000);
+    expect(major / local).toBeCloseTo(0.25, 2);
+  });
+
+
   it('an outside team is sent home when the county will extend no more credit, instead of bankrupting the service', () => {
     const w = flatWorld(120, 60, PINE);
     w.weather.windSpeed = 2;
