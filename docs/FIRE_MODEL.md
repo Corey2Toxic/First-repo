@@ -16,7 +16,7 @@ Measured on the 1.1.1 tree with the harnesses in `scripts/v2/`:
 
 | Finding | Evidence |
 |---|---|
-| Fires lasted a day. 45 of 49 Tinderbox wildfires were out within one day in 12 years; none reached 1,000 ha; no homes were lost. With no crews at all the largest fire was 796 ha. | `regime.ts tinderbox <seed> 12 [nodispatch]` |
+| A fire moved only while wind drove it through fast fuel. Passive Tinderbox, four valleys, 20 years: 68 % of wildfires out within a day and 54 % of those that passed 10 ha; the rest were wind-driven runs (one to four fires over 1,000 ha per valley, up to 13 days, 0–54 homes lost). (The evaluation first read this from a single quiet valley, 45 of 49 fires out within a day and none over 1,000 ha, and said "fires last a day"; four valleys do not support it that flatly.) | `FW_ROOT=<1.1.1> batch.ts 20 a,b,c,d tinderbox` |
 | **Root defect: spread progress was thrown away at every 3-hour step.** A front that needed more than three hours to cross a cell never arrived. Realised / specified head rate: pine litter 0.70 at 6 m/s, 0.46 at 3 m/s (0.27 when damp), 0.05 at 1 m/s; fir litter 0; all litter at night 0. | `slowspread.ts` |
 | Intensity was a proxy of fuel load and dryness, blind to rate of spread and direction: flanks "burned" as hot as the head, a fast grass fire was workable on every edge, and crown fire was decided by load. | `fire.ts` (v1.1), `firetrace.ts` |
 | Putting a cell out did not stop it spreading during that step. | `crews.ts` `extinguish` (v1.1) |

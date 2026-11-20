@@ -127,8 +127,7 @@ Order of work, with what each step taught:
 
 1. **Evaluation before design.** Read the code and the earlier reports, then measured the inherited
    game with new harnesses that run on any source tree. The finding that organised everything else:
-   spread progress was discarded at every 3-hour step, so slow fire could not exist and every fire
-   was over in a day. An attempt to study the whole codebase with a fan-out of thirteen agents ran
+   spread progress was discarded at every 3-hour step, so slow fire could not exist. An attempt to study the whole codebase with a fan-out of thirteen agents ran
    two at a time on this machine and lost eleven to a usage limit; three reports survived (fire,
    crews, wildlife). Lesson: on a small machine, read it yourself and keep the measurements.
 2. **Fire core.** Progress kept between steps; Byram intensity with flame length in metres; fronts
@@ -183,7 +182,12 @@ Order of work, with what each step taught:
     harness reported ratios of 0.5–0.7 for a model that makes 1.1–1.5; it now measures an
     established fire. And the 1.1.1 figures quoted since the evaluation (0.79 and 0.27 for pine
     litter at 6 and 3 m/s) had come from a prototype harness; the committed one gives 0.70 and
-    0.46 (0.27 is damp litter). Lesson: re-run every command in a report before signing it.
+    0.46 (0.27 is damp litter). A third: "fires last a day, none passes 1,000 ha, no home is lost"
+    was read from one quiet valley on the first day and repeated ever since. Four valleys over
+    twenty years on 1.1.1 show two fires in three out within a day, and also one to four fires over
+    1,000 ha per valley and up to 54 homes lost. The mechanism stands (slow fire did not exist);
+    the summary did not. Lesson: re-run every command in a report before signing it, and never
+    let one seed stand for a version.
 
 Things worth knowing when changing this code:
 

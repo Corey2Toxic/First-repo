@@ -212,3 +212,9 @@ the fire report. The reasons and the rest of what is missing are in `V2_REPORT.m
 Corrected at release: the slow-spread figures in section 1 are those the committed harness gives
 (`scripts/v2/slowspread.ts`). The draft quoted 0.79 and 0.27 for pine litter at 6 and 3 m/s from a
 prototype harness with a damper fuel bed; 0.27 is the damp-litter figure.
+
+Also corrected at release: the first two rows of the table in section 1 describe one valley over
+12 years. They are left as written because they are what the design was argued from, but that
+valley was a quiet one. On four valleys over 20 years 1.1.1 put out 68 % of its fires within a
+day, and each valley also had one to four fires over 1,000 ha, fires of up to 13 days, and up to 54
+homes lost (`V2_REPORT.md`, 6.3). The third row, the mechanism, holds on every valley.

@@ -261,7 +261,7 @@ describe('fire core v2: fires that last', () => {
       if (w.burning.length > 0) alive++;
       if (a[2] > a[0] * 1.3) grew++;
     }
-    // 1.1.1: 45 of 49 Tinderbox wildfires were out within a day
+    // 1.1.1: litter fire did not move at night or in a light wind, so a fire that lost its wind was out
     expect(alive).toBeGreaterThanOrEqual(5);
     expect(grew).toBeGreaterThanOrEqual(5);
   });

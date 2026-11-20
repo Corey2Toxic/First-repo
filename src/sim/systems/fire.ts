@@ -70,8 +70,9 @@ export function defaultResponse(w: World, i: number, cause: FireCause): FireResp
   if (z === ZONE.BUFFER) return 'suppress';
   const d = nearestStructureDist(w, i % w.W, (i / w.W) | 0);
   // Wilderness policy: a lightning fire is left to do its work when the day allows it. (v1.x
-  // monitored every wilderness fire whatever the weather, harmless while fires died in a day; a
-  // fire now lives for weeks, and one left alone in August at very high danger takes the valley.)
+  // monitored every wilderness fire whatever the weather, harmless while a fire stopped wherever
+  // its head stopped; a fire now keeps its flanks and its nights, and one left alone in August at
+  // very high danger takes the valley.)
   if (z === ZONE.WILDERNESS && d > 16 && cause === 'lightning' && w.weather.dangerClass <= 2 && !w.weather.windEvent) return 'monitor';
   return 'suppress';
 }
@@ -396,8 +397,8 @@ function pushEvent(t: number, target: number, source: number, kind: number, rate
  * about 30 m/h (one cell in three hours) never arrived: pine litter in a 3 m/s wind advanced at 46 %
  * of its specified rate (27 % when damp), at 1 m/s at 5 %, fir litter and every night-time litter
  * fire not at all.
- * Flanks, backing fire and overnight creep did not exist, and nearly every wildfire was out within a
- * day whatever anyone did. Progress made by several sources in the same step does not add up: the
+ * Flanks, backing fire and overnight creep did not exist: a fire moved only while wind drove it
+ * through fast fuel, and two wildfires in three were out within a day. Progress made by several sources in the same step does not add up: the
  * step's best is committed when the step ends.
  */
 let progNew = new Float32Array(0);

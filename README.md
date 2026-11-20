@@ -16,12 +16,13 @@ herds — is simulated and procedurally rendered; there are no art assets.
 ## Version 2.0
 
 2.0 is a redesign of the game around one diagnosis of 1.1.1: *the player had no working relationship
-with time*. Fires were over in a day (the model threw away a fire's progress every three hours, so
-slow fire could not exist), nothing said where a fire was going, and nothing connected years of work
-to the day it was tested. What 2.0 changes:
+with time*. A fire moved only while wind drove it through fast fuel (the model threw away a front's
+progress every three hours, so slow fire could not exist: no flanks, no backing fire, nothing at
+night), nothing said where a fire was going, and nothing connected years of work to the day it was
+tested. What 2.0 changes:
 
 - **Fire has a life.** It creeps, lies down at night, wakes in the afternoon, runs with the wind and
-  dies in rain. A fire that escapes the first crews lasts days or weeks. Intensity is physical: flame
+  dies in rain. A fire that escapes the first crews lasts days, the largest a week or two. Intensity is physical: flame
   length in metres decides what a hand crew, an engine or an aircraft can face, whether a stand
   torches, and whether a house burns.
 - **You can see it coming.** A five-day forecast drawn from the weather that will actually arrive;

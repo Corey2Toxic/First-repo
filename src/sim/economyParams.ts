@@ -19,7 +19,7 @@ export const COST = {
   airPatrol: 55_000, // per year
   wolfReintro: 60_000,
   beaverRelocation: 9_000,
-  suppressionHour: 400, // per crew-hour of overtime on a fire (v1.x: 850, when fires lasted a day)
+  suppressionHour: 400, // per crew-hour of overtime on a fire (v1.x: 850, when two fires in three were out within a day)
   pileBurnPerHa: 120, // extra when harvest slash is piled and burned
   firewisePerHome: 3_000, // home hardening under the firewise code, per house (cell), over the programme
   aidMobilize: 25_000, // the valley's share of calling an outside incident team to a fire (the state pays the rest)
