@@ -4,15 +4,16 @@ How the game was verified, what each check covers, and what was found along the 
 
 ## Added in 2.0
 
-Suites (all under `npm test`; 23 files, about six minutes):
+Suites (all under `npm test`: 21 files, 180 tests, about six minutes on an idle four-core machine;
+the 30-year stability tests carry a 150-second budget each and fail it on a loaded one):
 
 | Suite | What it verifies |
 |---|---|
-| `tests/sim/fire2.test.ts` (20) | A slow fire arrives at its specified rate (1.1.1: 46 % of it in pine litter at 3 m/s, 27 % when the litter is damp, 5 % at 1 m/s, never in fir litter or at night); spread progress is kept between steps and forgotten when the fire is out; flame lengths match published fuel models; the heel and flanks burn cooler than the head; a knocked-down cell stops spreading; long flames cross a scraped line; heavy fuel in drought holds fire overnight and a grass fire dies in damp night air; rain ends a fire; each fuel answers to its own moisture; mixed beds; aspen as a fuel break; the understory makes a stand torch and a light fire clears it; a thinned block drops a crown run to the ground; house-to-house fire needs wind. |
-| `tests/sim/crews2.test.ts` (19) | No queue deadlock; a burn out of prescription does not hold crews; fatigue only from fire duty; several crews share a project; burn units split at 300 ha; burns carry, stay in their unit and are charged for what burned; the burn boss's go/no-go; dispatch follows open edge and re-prioritises between fires; engines protect homes; the life of an outside incident team; air tanker limits; funds checks; fireline while crews are committed; line weathering; the firewise programme; thinning lowers hazard. |
+| `tests/sim/fire2.test.ts` (21) | A slow fire arrives at its specified rate (1.1.1: 46 % of it in pine litter at 3 m/s, 27 % when the litter is damp, 5 % at 1 m/s, never in fir litter or at night); spread progress is kept between steps and forgotten when the fire is out; flame lengths match published fuel models; the heel and flanks burn cooler than the head; a knocked-down cell stops spreading; long flames cross a scraped line; heavy fuel in drought holds fire overnight and a grass fire dies in damp night air; rain ends a fire; each fuel answers to its own moisture; mixed beds; aspen as a fuel break; the understory makes a stand torch and a light fire clears it; a thinned block drops a crown run to the ground; house-to-house fire needs wind; a fresh burn scar carries no fire and an old one does. |
+| `tests/sim/crews2.test.ts` (20) | No queue deadlock; a burn out of prescription does not hold crews; fatigue only from fire duty; several crews share a project; burn units split at 300 ha; burns carry, stay in their unit and are charged for what burned; the burn boss's go/no-go; dispatch follows open edge, gives every fire a working minimum before any gets more, and re-prioritises between fires; engines protect homes; the life of an outside incident team; air tanker limits; funds checks; fireline while crews are committed; line weathering; the firewise programme; thinning lowers hazard. |
 | `tests/sim/forecast.test.ts` (4) | The forecaster's future is the future that happens (checked day by day, across a year end); looking ahead changes no state; forecasts are stable and replayable; skill falls with lead time. |
 | `tests/sim/projection.test.ts` (14) | The projected head of a fire is where the simulation puts it (grass, pine litter, thicket), and the area is the right size; it runs downwind; it starts from the burning cells of reported fires only; a lake stops it and a road holds a surface fire in a light wind; treated ground shows as fire on the ground; town arrival times and homes in the path; the hours ahead follow today's weather then the forecast; **the projection and the fireshed change no state and draw no random number** (state hash). Fireshed: reaches upwind; agrees with the forward projection; exposure is higher in a thicket than in grass and falls with treatment and with hardening; behaviour classes; every town of a generated valley. |
-| `tests/sim/incident.test.ts` (17) | Stages and their one-time notices; the morning briefing; after-action reports (what held the edge: water, rock, crews' line; how treated ground burned against the rest; homes reached and lost; none for prescribed burns or unseen fires; saved and reloaded); exposure is surveyed at the start and each year end, falls when the ground round the homes is treated, and the residents and the score follow it; every scenario has three objectives and they follow the valley; the wilderness policy reads the weather; the state's share of a major incident; an outside team is sent home at the credit limit and never called without money in hand. |
+| `tests/sim/incident.test.ts` (18) | Stages and their one-time notices; the morning briefing; after-action reports (what held the edge: water, rock, crews' line; how treated ground burned against the rest; homes reached and lost; none for prescribed burns or unseen fires; saved and reloaded); exposure is surveyed at the start and each year end, falls when the ground round the homes is treated, and the residents and the score follow it; every scenario has three objectives and they follow the valley; the wilderness policy reads the weather; the state's share of a major incident; emergency fire spending stops at the credit limit, the state carries the fires from there and the outside team stays; a standing order never calls a team with nothing in hand; "put fire back to work" counts fire the warden chose and not fire that got away. |
 | `tests/sim/wildlife2.test.ts` (4) | What deer eat leaves the range; a small pack kills about twenty deer a wolf a year; a lone wolf holds its territory, then pairs or is gone; hunting tags sell at full price only up to what the valley can host. |
 | `tests/sim/compat.test.ts` (+1) | A save written by the untouched **1.1.1** code, with a fire burning, loads: the understory is rebuilt, flames are in metres, the towns are surveyed, and it plays on for 400 days and saves in the current format. |
 
@@ -22,10 +23,12 @@ hour); the starting roster is three hand crews and two engines (`world.test.ts`)
 steady spread mark their fire as established (`helpers.ts`), because a new fire now takes hours to
 build.
 
-End-to-end (`npm run build && npm run test:e2e`): the 27 inherited checks plus the Charge panel,
-the five-day forecast, the Fireshed and Bad-day fire lenses painting the valley, and, on the first
-wildfire anyone reports, the incident card with its 48-hour projection and the call for an outside
-team (34 checks).
+End-to-end (`npm run build && npm run test:e2e`, and the same against
+`dist-single/fireweed-hosted.html`): the 27 inherited checks plus the Charge panel, the five-day
+forecast, the Fireshed and Bad-day fire lenses painting the valley, and, on the first wildfire
+anyone reports, the incident card with its 48-hour projection, a change of response to Confine,
+calling an outside team and sending it home, and a hand crew sent to cut a line drawn with the
+fireline tool (39 checks).
 
 Measurement harnesses (`scripts/v2/`, each loads the simulation from `FW_ROOT`, default this
 checkout, so every figure can be re-measured on the preserved 1.1.1 branch):
@@ -33,13 +36,13 @@ checkout, so every figure can be re-measured on the preserved 1.1.1 branch):
 | Harness | Question |
 |---|---|
 | `slowspread.ts` | Does a slow fire arrive at the rate the model specifies? |
-| `regime.ts`, `batch.ts` | One valley's fire regime; several seeds and scenarios in parallel. |
+| `regime.ts`, `batch.ts` | One valley's fire regime, including how long its fires last; several seeds and scenarios in parallel. |
 | `fuels.ts` | What would a valley's fuels do on a dry afternoon, and how does that change over years without fire? |
 | `firetrace.ts` | One fire, step by step. |
 | `attack.ts` | Why does initial attack succeed or fail (report delay, size on arrival, edge too hot, danger class)? |
 | `project.ts lab / skill / shed / homes` | The projection against the simulation and against real fires; firesheds and what treatment does to them; homes lost against the fireshed's estimate. |
 | `wildlife.ts` | Deer, wolves and beavers every five years for decades. |
-| `bots.ts` | Four strategy bots play whole tenures on the same valleys. |
+| `bots.ts` | Strategy bots (passive, firefighter, steward, neglect, rewilder) play whole tenures on the same valleys and report which charges they met. |
 | `look.ts`, `night.ts` | Play the build in a headless browser and screenshot the interface. |
 | `make-fixture.ts` | Write a save with another tree's code (the 1.1.1 fixture). |
 
@@ -53,7 +56,13 @@ that torched kept its crown flag for life, so crews refused to work it at night 
 a standing order for outside teams bankrupted a passive warden (`batch.ts`); a steward who had
 spent the reserve on thinning went bankrupt in one fire season, and fires left to burn in
 Wilderness in August took the valley (`bots.ts`); treatment and hardening did not save homes
-(`project.ts homes`); every lightning fire was born into a gale (`attack.ts`).
+(`project.ts homes`); every lightning fire was born into a gale (`attack.ts`); most of a
+Tinderbox valley torched in a light wind, the cause of years in which half of it burned
+(`bots.ts`, then a torching census); a valley that burned 119 % of its land in a year (`bots.ts`);
+three of the council's charges met by doing nothing (`bots.ts`). And, found by re-running the
+report's own commands before release: a harness that mistook the build-up of a new fire for a
+defect, and a description of 1.1.1 ("fires last a day") that one valley supported and four did
+not (`batch.ts` on the 1.1.1 checkout).
 
 ## Automated suites
 
