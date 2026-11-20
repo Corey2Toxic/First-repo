@@ -38,9 +38,9 @@ plainly where no such check was possible.
 | Wolves present (12 × 50 y) | 58 % of years, peaks 13/100 km² | 89 %, peaks ≤ 8.7/100 km² |
 | Deer regulation | imposed logistic K | none imposed; 0.6–48/km² at year 50 (median 7.6) |
 | Beaver colonies after 50 y (from 2–4) | 1.4 on average | 26.7 |
-| Bark-beetle outbreaks ≥ 150 ha | 5 in ~2,550 run-years | 16 in one 30-year Tinderbox run |
+| Bark-beetle outbreaks ≥ 150 ha | 5 in ~2,550 run-years | 16 in one 30-year Tinderbox run (monthly threshold crossings of one outbreak; see section 9) |
 | Old growth after 50 y | 0.55× start | 1.81× start |
-| Save/reload state-hash divergence | 12/108 | 0/116 |
+| Save/reload state-hash divergence | 12/108 | 0/116 on an earlier commit; 2/109 on 1.1 as delivered, 0 in 1.1.1 (section 9) |
 | Score: steward vs grant-all vs passive (Tinderbox) | 71.3 / 70.8 / 64.0 | 87.7 / 78.5 / 73.8 (steward wins 6/6 seeds) |
 | Homes lost per 50-year run, default management (12 runs) | 43.6 (max 88) | 59.1 (max 242) — see section 8 |
 | Headless cost per simulated year (medium, Tinderbox) | 1.91 s | 1.97 s |
@@ -58,7 +58,7 @@ and say why), **Unresolved** (accepted but not fixed in 1.1).
 |---|---|---|---|---|---|---|
 | D1 | High | Houses ignited outside a fire's bounding box stay BURNT with a dead fire id; rebuilt houses there are fireproof | **Accepted** — reproduced 6/6 stuck houses in the auditor's minimal construction | Every ignition path extends the fire's bounds; burnout releases cells no live fire owns; houses are rebuilt only on released ruins; loading a v1.0 save releases orphaned cells (46f23a7, b98b202) | `fire.test.ts` strip fire to an isolated house; rebuilt house burns again; v1.0-style save with a stuck cell | Auditor's `exp_a2`: houses lost in 42/200 strip fires, left stuck **0/42** (v1.0: 6/6). `exp_a3` builds the stuck state by hand, so it still shows such a house cannot burn (0/300); v1.1 no longer produces that state, and loading repairs it |
 | D21 | High | Quit to title from a medium/large map breaks the app | **Accepted** — root cause confirmed: the session's lens buffer stayed bound to the shared renderer, the small title backdrop copied it into a smaller texture | `setWorld` drops overlay buffers of the old world; `refresh` never copies a mismatched buffer; `dispose` is idempotent and detaches the lens; screen changes are guarded with an error screen that offers Reload (9256a52, e289883, cf1d4f5) | e2e: quit from small and medium games, load a small save inside a medium game, every quit must reach the title in 15 s with no session left (27 checks) | Auditor's `quit_repro.mjs` against both builds: v1.0 **0/5** trials reach the title ("offset is out of bounds" in `MapRenderer.refresh`, as reported); v1.1 **5/5**, no page errors |
-| D2 | High | The Community Buffer zone has no simulation effect | **Accepted** — `ZONE.BUFFER` was read nowhere in `src/sim`. Implemented rather than removed, so the tutorial and tooltips are now true | Wildfires burning into a buffer are always suppressed and dispatched first (plus an extra crew); firewise credit only for *treated* buffer within 1 km; treated buffers are maintained yearly at $45/ha; towns do not grow into buffers (8922481) | `buffer.test.ts` | Same treatments with and without the buffer designation (steward bot, Tinderbox 25 y, 6 seeds): score 87.7 vs 82.5, higher on 6/6 seeds; homes lost 1.0 vs 5.3 per tenure (one seed, 5 vs 25, carries most of it). The auditor's probe that only *paints* buffers still shows no clear effect (First Season 30 y, 4 seeds: 74.5 vs 72.8 for passive; v1.0 63.3 vs 61.8), as intended: an untreated buffer earns no firewise credit |
+| D2 | High | The Community Buffer zone has no simulation effect | **Accepted** — `ZONE.BUFFER` was read nowhere in `src/sim`. Implemented rather than removed, so the tutorial and tooltips are now true | Wildfires burning into a buffer are always suppressed and dispatched first (plus an extra crew); firewise credit only for *treated* buffer within 1 km; treated buffers are maintained yearly at $45/ha; towns do not grow into buffers (8922481) | `buffer.test.ts` | Same treatments with and without the buffer designation (steward bot, Tinderbox 25 y, 6 seeds): score 87.7 vs 82.5, higher on 6/6 seeds; homes lost 1.0 vs 5.3 per tenure (one seed, 5 vs 25, carries most of it). The auditor's probe that only *paints* buffers still shows no clear effect (First Season 30 y, 4 seeds: 74.5 vs 72.8 for passive; v1.0 63.3 vs 61.8), as intended: an untreated buffer earns no firewise credit (not quite: see section 9, R6) |
 | D3 | High | Auto-dispatch only at midnight; crews 10–30× too slow | **Accepted** — reproduced (median 15 h report→assignment) | Dispatch every 3-h step while a reported fire burns; nearest free crews of each kind per fire in priority order; roads ~30 km/h, foot ~2.5 km/h on open level ground, helicopters ~160 km/h, admissible A*; engines drive gentle open ground and attack the edge within hose reach; night initial attack on small fires; transactional assignment; dawn release of lined fires (7e0429a, b72475d) | `society.test.ts` dispatch timing and requeue tests | Auditor's `exp_d_dispatch` (Tinderbox, 3 seeds × 6 y): fires given a crew **46/47** (v1.0 16/33); report → assignment median **3 h** (v1.0 15 h); → ground work median 3 h (v1.0 33 h); mean area at first ground work 59 ha (v1.0 354 ha); final mean area 117 ha (v1.0 806 ha) |
 | D22 | Med. | Every council review shows $0k / $0k | **Accepted** | The archived ledger is passed to the review (2d638fa) | `review.test.ts` | Review totals equal the archived ledger in every year tested |
 | D4 | Med. | Planting resets stand age to 1 year | **Accepted** | Planting adds a cover-weighted young cohort (924297b); old growth is now measured on a stand-age layer (98297f1) | `ecology.test.ts` planting keeps old trees old | — |
@@ -93,7 +93,7 @@ and say why), **Unresolved** (accepted but not fixed in 1.1).
 | Wolves boom to 15/100 km² and go extinct; persistence by recolonisation dice | **Accepted** | ~130 km² territories, Fuller-type numerical response, type II functional response, dispersal and immigration into vacant territory (924297b) | 12 runs × 50 y: wolves present 89 % of years (v1.0 58 %), peak density ≤ 8.7 wolves/100 km² (v1.0 up to 13.3); regression test bounds density below 10 with wolves present ≥ 15 of 20 years |
 | "Type II functional response" mislabelled (actually a prey refuge) | **Accepted** | A real type II response (half-saturation 1.5 deer/km²) | — |
 | Trophic cascade weak; landscape of fear not supported at landscape scale | **Partially resolved** | With persistent wolves the cascade operates through deer numbers and browse; the fear field is unchanged and I did not test it separately | Regression test: paired runs with and without wolves show fewer deer and less browse with wolves. Bots: the wolf-bounty strategy ends with ~3–4× the deer of every strategy that keeps wolves. I did not measure the aspen end of the cascade across seeds after the final fixes |
-| Bark beetles near-inert (≥ 150 ha outbreaks in 5 of ~2,550 run-years) | **Accepted** | Eruptive model with drought memory, crowding, host depletion and per-cell winter kill (98297f1) | Auditor's `exp_o_beetles` (30 y): Tinderbox 16 outbreaks, largest 5,816 ha, red-phase canopy peaking at ~1,440 ha-equivalent in years 5–8; First Season 7 outbreaks (397–2,840 ha) in years 25–30. v1.0: ≥ 150 ha outbreaks in 5 of ~2,550 run-years |
+| Bark beetles near-inert (≥ 150 ha outbreaks in 5 of ~2,550 run-years) | **Accepted** | Eruptive model with drought memory, crowding, host depletion and per-cell winter kill (98297f1) | Auditor's `exp_o_beetles` (30 y): Tinderbox 16 outbreak-threshold crossings (essentially one outbreak, section 9), largest 5,816 ha, red-phase canopy peaking at ~1,440 ha-equivalent in years 5–8; First Season 7 outbreaks (397–2,840 ha) in years 25–30. v1.0: ≥ 150 ha outbreaks in 5 of ~2,550 run-years |
 | Old-growth trend | **Accepted, extended** — 37–52 % of the reported loss was an averaging artefact of cohort mean ages | Stand-age layer (98297f1) | 12 runs × 50 y: old growth ends at 0.76–3.63× its start (mean 1.81) instead of 0.37–0.85× (mean 0.55) in v1.0 |
 | Reservoir siltation ~1 %/yr "plausible" | **Disputed in part** | v1.0's forest cover factor floored at 0.0225 (5–20× RUSLE), so intact forest supplied most sediment and fire scars barely stood out; recalibrated to 0.2–0.5 %/yr fire-free (408e204) | Fire-free First Season: 0.2–0.5 %/yr capacity loss across seeds (v1.0 0.44 %/yr). With fire, auditor's `exp_f_sediment` (First Season, 30 y): 0.42 and 0.29 of capacity (v1.0 0.39 and 0.45), now mostly from burned slopes; debris flows 4 and 2 (v1.0 8 and 10) |
 | Open water balance (lateral subsidy, moisture floors) | **Unresolved** (declared abstraction) | — | — |
@@ -330,3 +330,58 @@ Calibration choices that carry most of the uncertainty: the fire heterogeneity f
 `KE_SHRUB`, `KE_LITTER`), the erosion coefficient, the deer intake and winter-range parameters, the
 wolf territory size and the beetle resistance thresholds. Each is documented at its definition with
 its source or the observation it was set against.
+
+## 9. Addendum: version 1.1.1, after the independent regression verification
+
+An independent regression verification of 1.1 (commit `07e49738…`) confirmed the software repairs
+and found one remaining correctness defect (R1) and three overstated claims in this report (R7).
+Version 1.1.1 fixes the defect. The corrections are recorded here rather than by rewriting the
+sections above; the remaining findings (R2–R6, R8, R9) are listed for the next phase in
+`docs/NEXT_PHASE.md`.
+
+**R1: a reload could change the future (fixed in 1.1.1).** Sections 2 and 3.1 (D11) report 0 of
+116 diverging reloads. That run was made on an intermediate commit, before the final deer and river
+fixes. On the delivered commit the verification found 2 of 109, and I reproduced exactly that (days
+6,190 and 6,258 of Tinderbox `audit-save-1`). Cause: the human-ignition weights are cached and
+rebuilt only when the infrastructure or zoning counter moves, but they also depend on where houses
+stand. Losing a house bumped the counter; rebuilding a ruin did not. After a fire year in which a
+town rebuilt without growing, a long-running game kept stale weights that a reloaded game
+recomputed, and a later human ignition landed on a different cell. At the verification's fork point
+the running game's cache still listed five cells where rebuilt houses stood and lacked three new
+town-edge cells. The defect has been latent since v1.0. Fix: houses are placed through one function,
+`placeStructure` (the counterpart of `loseStructure`), which bumps the counter; rebuilt houses also
+reach the map at once now. Three regression tests in `tests/sim/reload.test.ts` fail on 1.1 and pass
+on 1.1.1. The verification's fork experiment is now a release gate, `scripts/qa/forkcheck.ts`:
+
+| Fork check (each reload run 360 days and compared with the uninterrupted game) | 1.1 | 1.1.1 |
+|---|---|---|
+| Verification's harness, Tinderbox `audit-save-1` and Boomtown `audit-save-2`, 26 years each | 2 of 109 diverged | 0 of 108 |
+| `forkcheck.ts`, the same two cases | 2 of 109 | 0 of 108 (31 mid-fire) |
+| `forkcheck.ts`, First Season, Silent Woods, After the Burn, Custom (new seeds, 20 years each) | not run | 0 of 159 (40 mid-fire) |
+
+(The fixed game's future differs from 1.1's after its first rebuild year, so its save points, and
+the number of mid-fire forks, differ slightly.) At the verification's bisected fork point (day 6,190)
+the fixed game and its reload agree for the next 400 days, and both end at the state hash the
+verification obtained by forcing the cache refresh in the unfixed game (`E0E75D6E7A7AF5E4`).
+
+**R7 corrections.**
+
+1. *Suppression.* Sections 2, 3.2 and 6.2 compare default suppression with none on four seeds, on
+   which v1.0 showed no gain. On ten seeds the verification found that v1.0's default suppression
+   already cut burned area by 14 % (lower on 7 of 10), and v1.1's cuts it by 42 % (lower on 8 of 10);
+   homes lost per tenure were 17.7 vs 27.8 in v1.0 and 15.6 vs 36.9 in v1.1. The improvement is real
+   but smaller relative to v1.0 than this report states.
+2. *Bark beetles.* "16 outbreaks in one 30-year Tinderbox run" counts monthly crossings of the
+   outbreak threshold; it is essentially one outbreak, in years 5–8. Across 24 fifty-year runs the
+   verification found outbreak-scale years in 20 % of run-years (v1.0: 0.25 %).
+3. *Determinism.* "0 of 116" did not hold on the delivered commit; see R1.
+
+**R6.** Section 3.1 (D2) says an untreated buffer earns no firewise credit. The rating counts buffer
+cells that are treated *or* naturally light (fuel hazard below 0.28), so zoning an untreated ring on
+low-hazard ground does raise it: from 0.47 to 0.58 on average across the verification's 32 forks.
+The buffer test's name has the same imprecision. Unchanged in 1.1.1.
+
+**Buffer effect on fresh seeds.** On four seeds I never used, the verification found the buffer
+designation worth +2.0 points and 3.2 vs 4.8 homes lost per tenure, about 40 % of the effect section
+3.1 reports on my six seeds.
+
