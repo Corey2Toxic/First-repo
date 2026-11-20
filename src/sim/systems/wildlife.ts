@@ -262,8 +262,8 @@ function herdsMonthly(w: World): void {
  *  - pups survive in proportion to the deer in the territory per wolf; hungry packs raise none;
  *  - most dispersers leave the valley; a disperser pair settles only in a vacant territory;
  *  - dispersing pairs from outside settle in vacant territory now and then (~25 %/yr while there is
- *    room and prey),
- *    not only after extinction.
+ *    room and prey), not only after extinction; since 2.0 not in a valley set up without wolves
+ *    until some have been released.
  */
 export const TERRITORY_RADIUS = 65; // cells (6.5 km), ~130 km²
 const TERRITORY_SPACING = 100; // minimum distance between territory centres, cells
@@ -496,8 +496,12 @@ function packsMonthly(w: World, hooks: WildlifeHooks): void {
   const gone = (p: Pack) => p.n < 1 || (p.n === 1 && p.lone !== undefined && w.day - p.lone > 540);
   for (const p of w.packs) if (gone(p) && hooks.onPackLost) hooks.onPackLost(p);
   w.packs = w.packs.filter((p) => !gone(p));
-  // dispersing pairs from beyond the valley settle in vacant territory now and then (not under a bounty)
-  if (w.month === 9 && w.policies.wolfPolicy !== 'bounty' && deerAll / (wolvesAll + 2) > 250) {
+  // dispersing pairs from beyond the valley settle in vacant territory now and then (not under a
+  // bounty), and not in a valley set up without wolves until its warden has brought some back: the
+  // same rule beavers have had since 1.1. (Without it wolves walked into Silent Woods, "no wolves
+  // for eighty years", within about four years and stayed for 61–97 % of a passive tenure.)
+  const wolfCountry = w.config.wolves > 0 || (w.memory.wolfReleases ?? 0) > 0;
+  if (wolfCountry && w.month === 9 && w.policies.wolfPolicy !== 'bounty' && deerAll / (wolvesAll + 2) > 250) {
     for (let k = 0; k < 20; k++) {
       const x = r.range(TERRITORY_RADIUS * 0.4, w.W - TERRITORY_RADIUS * 0.4),
         y = r.range(TERRITORY_RADIUS * 0.4, w.H - TERRITORY_RADIUS * 0.4);

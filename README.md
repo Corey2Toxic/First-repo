@@ -146,7 +146,7 @@ map when time is paused or at Watch speed.
 | **The Tinderbox** | A century of fire suppression, rising temperatures; 25 years. | Lose no more than 15 homes · halve the homes a bad day would take · keep severe fire under 20 % |
 | **After the Burn** | A vast fresh burn scar above the reservoir; debris-flow risk; 20 years. | Keep the reservoir under 25 % silted · lose no more than 8 homes · let the aspen come back |
 | **Boomtown** | Four towns growing into the forest; a hungry mill; 25 years. | Lose no more than 20 homes · cut by a quarter the homes a bad day would take · let the valley grow by a quarter |
-| **Silent Woods** | No wolves for 80 years, too many deer, dying aspen, no beavers; 25 years. | Wolves for half your tenure · four beaver colonies · let the aspen come back |
+| **Silent Woods** | No wolves for 80 years, too many deer, dying aspen, no beavers; 25 years. | Wolves for half your tenure · four beaver colonies · deer down to 5 per km² |
 | **Custom Valley** | Seed, size, warming, precipitation, fire history, wildlife, towns, funds, tenure. | Homes · exposure · trust |
 
 Every valley is generated from its seed: the same seed gives the same valley, a different seed a

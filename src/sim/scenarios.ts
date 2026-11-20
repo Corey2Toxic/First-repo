@@ -113,9 +113,9 @@ export const SCENARIOS: ScenarioInfo[] = [
     title: 'Silent Woods',
     tagline: 'No wolves have howled here in eighty years. The aspen are dying.',
     description:
-      'With predators gone, deer browse every aspen shoot and willow sprout. The groves are old and not replacing themselves; the streams run straight and fast. Ranchers like it this way. The ecosystem does not.',
+      'With predators gone, deer browse every aspen shoot and willow sprout. The groves are old and not replacing themselves; the streams run straight and fast. Ranchers like it this way. The ecosystem does not. No pack will walk in on its own: the nearest wolves are three ranges away.',
     difficulty: 2,
-    charge: ['Wolves living in the valley for half your tenure', 'Four beaver colonies on the creeks', 'Let the aspen come back: 30 % of stands young'],
+    charge: ['Wolves living in the valley for half your tenure', 'Four beaver colonies on the creeks', 'Give the aspen a chance: deer down to 5 per km²'],
     config: {
       tenureYears: 25,
       difficulty: 'standard',

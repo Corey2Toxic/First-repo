@@ -262,6 +262,14 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
     exposure1: Math.round((ex?.now ?? 0) * 100),
     charges: obj.filter((o) => (o.kind === 'reach' ? o.progress >= 1 : o.state !== 'failed' && o.state !== 'behind')).length,
     met: obj.map((o) => ((o.kind === 'reach' ? o.progress >= 1 : o.state !== 'failed' && o.state !== 'behind') ? '+' : '-') + o.id).join(' '),
+    read: obj.map((o) => o.id + ': ' + o.reading).join(' | '),
+    deerKm2: +(w.herds.reduce((a, h) => a + h.n, 0) / (land / 100)).toFixed(1),
+    deerSeries: w.stats.deer.filter((_: number, k: number) => k % 60 === 59).map((x: number) => +(x / (land / 100)).toFixed(1)).join(','),
+    browse: +(() => {
+      let b = 0;
+      for (let i = 0; i < w.N; i++) if (w.L.water[i] < 2) b += w.L.browse[i];
+      return b / land;
+    })().toFixed(3),
     wolfYearsPct: Math.round((100 * w.stats.wolves.filter((x: number) => x > 0).length) / Math.max(1, w.stats.wolves.length)),
     colonies: w.colonies.filter((c) => c.active).length,
     trust: Math.round(w.memory.trustYears ? (w.memory.trustSum ?? 0) / w.memory.trustYears : w.trust),

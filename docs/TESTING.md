@@ -4,7 +4,7 @@ How the game was verified, what each check covers, and what was found along the 
 
 ## Added in 2.0
 
-Suites (all under `npm test`: 21 files, 180 tests, about six minutes on an idle four-core machine;
+Suites (all under `npm test`: 21 files, 182 tests, about six minutes on an idle four-core machine;
 the 30-year stability tests carry a 150-second budget each and fail it on a loaded one):
 
 | Suite | What it verifies |
@@ -14,7 +14,7 @@ the 30-year stability tests carry a 150-second budget each and fail it on a load
 | `tests/sim/forecast.test.ts` (4) | The forecaster's future is the future that happens (checked day by day, across a year end); looking ahead changes no state; forecasts are stable and replayable; skill falls with lead time. |
 | `tests/sim/projection.test.ts` (14) | The projected head of a fire is where the simulation puts it (grass, pine litter, thicket), and the area is the right size; it runs downwind; it starts from the burning cells of reported fires only; a lake stops it and a road holds a surface fire in a light wind; treated ground shows as fire on the ground; town arrival times and homes in the path; the hours ahead follow today's weather then the forecast; **the projection and the fireshed change no state and draw no random number** (state hash). Fireshed: reaches upwind; agrees with the forward projection; exposure is higher in a thicket than in grass and falls with treatment and with hardening; behaviour classes; every town of a generated valley. |
 | `tests/sim/incident.test.ts` (18) | Stages and their one-time notices; the morning briefing; after-action reports (what held the edge: water, rock, crews' line; how treated ground burned against the rest; homes reached and lost; none for prescribed burns or unseen fires; saved and reloaded); exposure is surveyed at the start and each year end, falls when the ground round the homes is treated, and the residents and the score follow it; every scenario has three objectives and they follow the valley; the wilderness policy reads the weather; the state's share of a major incident; emergency fire spending stops at the credit limit, the state carries the fires from there and the outside team stays; a standing order never calls a team with nothing in hand; "put fire back to work" counts fire the warden chose and not fire that got away. |
-| `tests/sim/wildlife2.test.ts` (4) | What deer eat leaves the range; a small pack kills about twenty deer a wolf a year; a lone wolf holds its territory, then pairs or is gone; hunting tags sell at full price only up to what the valley can host. |
+| `tests/sim/wildlife2.test.ts` (6) | What deer eat leaves the range; a small pack kills about twenty deer a wolf a year; a lone wolf holds its territory, then pairs or is gone; hunting tags sell at full price only up to what the valley can host; no wolves walk into a valley set up without them until some are released; Silent Woods' deer charge follows the herd. |
 | `tests/sim/compat.test.ts` (+1) | A save written by the untouched **1.1.1** code, with a fire burning, loads: the understory is rebuilt, flames are in metres, the towns are surveyed, and it plays on for 400 days and saves in the current format. |
 
 Each new test that covers something 1.1.1 got wrong says in its title or comment what 1.1.1 did.

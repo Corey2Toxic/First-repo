@@ -6,6 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import { smallWorld } from '../helpers.ts';
 import { DEER_INTAKE, wildlifeDaily } from '../../src/sim/systems/wildlife.ts';
+import { applyCommand } from '../../src/sim/commands.ts';
+import { objectives } from '../../src/sim/objectives.ts';
 import type { Herd, Pack } from '../../src/sim/types.ts';
 import type { World } from '../../src/sim/world.ts';
 
@@ -136,5 +138,53 @@ describe('wildlife (v2)', () => {
     expect(many.taken).toBeGreaterThan(many.cap * 10);
     expect(many.money).toBeLessThan(many.taken * 320 * 0.35);
     expect(many.money).toBeGreaterThan(few.money);
+  });
+  it('no wolves walk into a valley set up without them until the warden brings some back', () => {
+    // 1.1.1 and 2.0 until its last week: a pair settled in Silent Woods ("no wolves for eighty
+    // years") within about four years, and a passive warden had wolves for 61-97 % of a tenure
+    const w = smallWorld('silentwoods', 'silent-1');
+    expect(w.config.wolves).toBe(0);
+    expect(w.packs.length).toBe(0);
+    for (let d = 0; d < 360 * 12; d++) {
+      w.day++;
+      wildlifeDaily(w);
+    }
+    expect(w.packs.length).toBe(0);
+    // the same twelve autumns in a valley that has wolves in its country bring a pair
+    const w2 = smallWorld('silentwoods', 'silent-1');
+    w2.config.wolves = 1;
+    let arrived = false;
+    for (let d = 0; d < 360 * 12 && !arrived; d++) {
+      w2.day++;
+      wildlifeDaily(w2);
+      arrived = w2.packs.length > 0;
+    }
+    expect(arrived).toBe(true);
+    // a release puts the valley back on the wolves' map
+    let cell = -1;
+    for (let i = 0; i < w.N && cell < 0; i++) {
+      const x = i % w.W,
+        y = (i / w.W) | 0;
+      if (w.L.water[i] < 2 && w.towns.every((t) => Math.hypot(t.x - x, t.y - y) > 18)) cell = i;
+    }
+    expect(applyCommand(w, { t: 'reintroduceWolves', cell }).ok).toBe(true);
+    expect(w.packs.length).toBe(1);
+    expect(w.memory.wolfReleases).toBe(1);
+  });
+
+  it("Silent Woods' third charge follows the herd: five deer per km² or fewer over five years", () => {
+    const w = smallWorld('silentwoods', 'silent-2');
+    const deer = () => objectives(w).find((o) => o.id === 'deer')!;
+    let land = 0;
+    for (let i = 0; i < w.N; i += 5) if (w.L.water[i] < 2) land += 5;
+    const km2 = land / 100;
+    w.stats.deer = Array.from({ length: 80 }, () => Math.round(12 * km2));
+    expect(deer().progress).toBeCloseTo(5 / 12, 1);
+    expect(deer().progress).toBeLessThan(1);
+    expect(deer().reading).toContain('12.0 deer per km²');
+    // the last five years count, not the years before
+    w.stats.deer = [...Array.from({ length: 40 }, () => Math.round(12 * km2)), ...Array.from({ length: 60 }, () => Math.round(3 * km2))];
+    expect(deer().progress).toBe(1);
+    expect(deer().state).toBe('met');
   });
 });

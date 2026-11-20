@@ -167,6 +167,26 @@ function aspen(w: World, factor: number): Objective {
   return reach('aspen', 'Let the aspen come back', `Have ${pct(factor)} of the aspen in stands younger than 25 years: groves that are replacing themselves.`, share / factor, `${pct(share)} of aspen stands are young`, served(w));
 }
 
+/**
+ * Deer per km², averaged over the last five years on record. Silent Woods first asked for 30 % of
+ * its aspen in young stands; with wolves back for a whole tenure the bots reached 5–11 % (3 % with
+ * nothing done): groves answer over decades. What a warden can change in a tenure is the browsing.
+ */
+function deerDown(w: World, ceiling: number): Objective {
+  const km2 = landCells(w) / 100;
+  const recent = w.stats.deer.slice(-60);
+  const now = w.herds.reduce((a, h) => a + h.n, 0);
+  const mean = (recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length : now) / Math.max(1, km2);
+  return reach(
+    'deer',
+    'Give the aspen a chance',
+    `Bring the deer down to ${ceiling} per km² or fewer, averaged over five years: with wolves, with hunters, or both. Under more than that no aspen shoot or willow sprout grows up.`,
+    mean > 0 ? ceiling / mean : 1,
+    `${mean.toFixed(1)} deer per km² over the last five years (${(now / Math.max(1, km2)).toFixed(1)} now)`,
+    served(w),
+  );
+}
+
 function growth(w: World, factor: number): Objective {
   const start = w.memory.startPopulation ?? w.population;
   const now = w.population;
@@ -190,7 +210,7 @@ export function objectives(w: World): Objective[] {
       // catch thin the fuel and met it on all four verification valleys)
       return [keepHomes(w, 20), defensible(w, 0.75, 'Grow safer, not only bigger'), growth(w, 1.25)];
     case 'silentwoods':
-      return [wolvesBack(w, 0.5), beaversBack(w, 4), aspen(w, 0.3)];
+      return [wolvesBack(w, 0.5), beaversBack(w, 4), deerDown(w, 5)];
     default:
       return [keepHomes(w, 12), defensible(w, 2 / 3), trust(w, 50)];
   }
