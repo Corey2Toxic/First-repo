@@ -121,7 +121,7 @@ valley 0 % and 18 %; in 1.1.1, nothing at any wind. (`fuels.ts <scenario> cal-a 
   event), so a fire fans out.
 * A cell crews have knocked down does not spread.
 
-Result: fires of 1,000 ha or more last 5–16 days and do most of their growth on a few bad days.
+Result: of the fires that pass 10 ha, 35–45 % last three days or more (1.1.1: 15–20 %); the largest last one to two weeks and do most of their growth on a few bad days.
 
 ### 2.6 The first hours
 
@@ -200,20 +200,28 @@ westerly swinging a little either way at 6 %.
 
 ## 4. Regime
 
-Passive default management (no player actions, petitions refused, automatic dispatch and outside
-teams), medium valleys, calibration seeds `cal-a…d`, 20 years (`batch.ts 20 a,b,c,d …`):
+Passive default management (no player actions, petitions refused, automatic dispatch and, in 2.0,
+outside teams), medium valleys, calibration seeds `cal-a…d`, 20 years
+(`batch.ts 20 a,b,c,d tinderbox,firstseason,boomtown`, and the same with `FW_ROOT=<1.1.1>`):
 
-| | 1.1.1 Tinderbox | 2.0 Tinderbox | 2.0 First Season | 2.0 Boomtown |
-|---|---|---|---|---|
-| Fires held under 10 ha | see report | 59 % | 67 % | 60 % |
-| Fires of 1,000 ha or more | 0 | 5.8 | 1.3 | 4.8 |
-| Burned per year | see report | 2.9 % | 0.63 % | 3.6 % |
-| Worst year | see report | 35 % | 7 % | 45 % |
-| High-severity share | see report | 42 % | 18 % | 46 % |
-| Homes lost | 0 | 17.5 | 0 | 30.5 |
-| Longest fire | 1–2 days | 12 days | 6 days | 13 days |
+| | Tinderbox 1.1.1 | Tinderbox 2.0 | First Season 1.1.1 | First Season 2.0 | Boomtown 1.1.1 | Boomtown 2.0 |
+|---|---|---|---|---|---|---|
+| Fires held under 10 ha | 44 % | 62 % | 42 % | 67 % | 47 % | 65 % |
+| Of the fires past 10 ha, lasting 3 days or more | 19 % | 40 % | 15 % | 45 % | 20 % | 35 % |
+| Fires of 100–1,000 ha | 14.3 | 5.8 | 18.0 | 6.5 | 14.0 | 6.0 |
+| Fires of 1,000 ha or more | 2.0 | 4.8 | 3.8 | 2.8 | 1.8 | 2.8 |
+| Burned per year | 1.2 % | 3.6 % | 1.7 % | 1.5 % | 1.2 % | 1.8 % |
+| Worst year | 9 % | 26 % | 12 % | 21 % | 11 % | 21 % |
+| High-severity share | 15 % | 25 % | 13 % | 12 % | 5 % | 19 % |
+| Homes lost | 17.5 | 24.0 | 1.8 | 9.5 | 22.8 | 3.5 |
+| Longest fire | 9 days | 8 days | 4 days | 8 days | 6 days | 9 days |
 
-(The 1.1.1 column and the measurements with player strategies are in `docs/V2_REPORT.md`.)
+2.0 catches more fires small and has few of middling size; those that get away last longer and
+more of the area burns in a few very large fires. The spread between valleys is wide (the 2.0
+Tinderbox's worst year ranges from 2 % to 50 % across these four). On four verification valleys the
+Tinderbox figures were 68 % held, 1.2 % a year, worst year 19 %, 0.5 homes lost. The measurements
+with player strategies, and what is unsatisfactory about the largest fire years, are in
+`docs/V2_REPORT.md` (6.3, 6.4, 8).
 
 ## 5. How to re-measure
 

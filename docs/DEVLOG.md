@@ -188,6 +188,15 @@ Order of work, with what each step taught:
     1,000 ha per valley and up to 54 homes lost. The mechanism stands (slow fire did not exist);
     the summary did not. Lesson: re-run every command in a report before signing it, and never
     let one seed stand for a version.
+14. **Bots on all five scenarios found charges that asked nothing.** A passive warden met "put fire
+    back to work" with the fires its crews lost, "keep severe fire under 30 %" once fires burned
+    lower, and "do not let the danger grow" because wildfire thinned the fuel; wolves walked into
+    Silent Woods on their own; two aspen charges could not be met by anything a warden does in a
+    tenure; and a limit stopped counting at three quarters of its allowance while the panel showed
+    it holding. Six charges re-set, one counting rule fixed, and Silent Woods given the rule
+    beavers already had (no natural arrivals in a valley set up without them). Running 1.1.1's own
+    bots on the same valleys also showed that 1.1.1 already rewarded stewardship; the report says
+    so. Lesson: an objective is a claim about play and needs a script that fails it.
 
 Things worth knowing when changing this code:
 
@@ -211,7 +220,9 @@ Things worth knowing when changing this code:
   at 1.25× device pixels unless "Sharp rendering" is switched on); there is no adaptive scaling.
 - **Balancing**: in v1.1 strategy bots show steward > grant-all > passive ≈ suppress > timber baron on
   the auditor's seeds, with the steward ahead on every paired seed; weather luck still swings
-  individual tenures substantially, and the grade bands are a design calibration on six seeds.
+  individual tenures substantially. (2.0: steward > firefighter > passive ≈ neglect on verification
+  seeds, the steward ahead on every valley of all five scenarios; grade bands re-based on those
+  runs; a thin fire service is barely punished.)
 - **2.0's own limitations** are listed in `V2_REPORT.md` (section 8): above all, nobody has played
   it. The entries below date from 1.x; those that 2.0 changed say so.
 - **Fire intensity** is physical since 2.0 (Byram intensity, flame length in metres).
