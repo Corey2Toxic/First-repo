@@ -71,7 +71,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description:
       'A vast burn scar of standing dead timber. Hillsides that will shed soil in the first heavy storm, a reservoir downstream, a mill that wants to salvage, and a forest that knows how to come back — if you let it.',
     difficulty: 2,
-    charge: ['Keep the reservoir less than 25 % silted', 'Lose no more than 8 homes', 'Let the aspen come back: 30 % of stands young'],
+    charge: ['Keep the reservoir less than 25 % silted', 'Lose no more than 8 homes', 'Keep severe fire under 15 % of what burns'],
     config: {
       tenureYears: 20,
       difficulty: 'standard',

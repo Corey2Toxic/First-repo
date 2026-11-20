@@ -251,6 +251,7 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
     burnedPctYr: +((100 * burned) / yrs / land).toFixed(2),
     worstYearPct: +((100 * Math.max(0, ...w.stats.burned)) / land).toFixed(1),
     severePct: burned ? Math.round((100 * w.counters.totalHighSeverity) / burned) : 0,
+    severeShare: burned ? +(w.counters.totalHighSeverity / burned).toFixed(4) : 0,
     // of the fires that were fought (a fire left to burn on purpose is not a failed attack)
     caughtPct: Math.round((100 * fires.filter((f) => !f.monitored && f.area < 10).length) / Math.max(1, fires.filter((f) => !f.monitored).length)),
     monitored: fires.filter((f) => f.monitored).length,

@@ -152,21 +152,6 @@ function beaversBack(w: World, colonies: number): Objective {
   return reach('beavers', 'Slow the streams', `End your tenure with ${colonies} or more beaver colonies on the creeks.`, now / colonies, `${now} colon${now === 1 ? 'y' : 'ies'} now`, served(w));
 }
 
-function aspen(w: World, factor: number): Objective {
-  const s = w.stats.forest;
-  void s;
-  let young = 0,
-    n = 0;
-  for (let i = 0; i < w.N; i += 3) {
-    if (w.L.aspen[i] > 0.05) {
-      n++;
-      if (w.L.ageA[i] < 25) young++;
-    }
-  }
-  const share = n ? young / n : 0;
-  return reach('aspen', 'Let the aspen come back', `Have ${pct(factor)} of the aspen in stands younger than 25 years: groves that are replacing themselves.`, share / factor, `${pct(share)} of aspen stands are young`, served(w));
-}
-
 /**
  * Deer per km², averaged over the last five years on record. Silent Woods first asked for 30 % of
  * its aspen in young stands; with wolves back for a whole tenure the bots reached 5–11 % (3 % with
@@ -204,7 +189,10 @@ export function objectives(w: World): Objective[] {
       // 1.5 m a passive warden's fires average 20 % and a steward's 10 %)
       return [keepHomes(w, 15), defensible(w, 0.5), severity(w, 0.2)];
     case 'afterburn':
-      return [reservoir(w, 0.25), keepHomes(w, 8), aspen(w, 0.3)];
+      // (the third charge asked for 30 % of aspen in young stands: 16–28 % whatever the warden did,
+      // because it is the burn that made them young. A healing scar that burns hard again is what
+      // fills the reservoir.)
+      return [reservoir(w, 0.25), keepHomes(w, 8), severity(w, 0.15)];
     case 'boomtown':
       // (the second charge was "do not let the danger grow"; the fires a passive warden fails to
       // catch thin the fuel and met it on all four verification valleys)
