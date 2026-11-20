@@ -14,7 +14,7 @@ import { makeCrew } from '../../src/sim/gen/crews.ts';
 import { ESCAPED_AREA, MAJOR_AREA, fireStage, morningBriefings, updateIncidents } from '../../src/sim/incident.ts';
 import { makeEventHooks } from '../../src/sim/events.ts';
 import { refreshExposure } from '../../src/sim/projection.ts';
-import { objectives, objectivesMet } from '../../src/sim/objectives.ts';
+import { objectiveMet, objectives, objectivesMet } from '../../src/sim/objectives.ts';
 import { SCENARIOS } from '../../src/sim/scenarios.ts';
 import { Simulation } from '../../src/sim/sim.ts';
 import { decodeWorld, encodeWorld, stateHash } from '../../src/sim/save.ts';
@@ -365,8 +365,13 @@ describe("the council's charge", () => {
     w.counters.totalStructuresLost = 9;
     expect(homes().progress).toBeCloseTo(0.6, 5);
     expect(homes().state).toBe('on-track');
+    // exactly the allowance keeps the charge (until release it stopped counting at three quarters)
+    w.counters.totalStructuresLost = 15;
+    expect(homes().state).toBe('behind');
+    expect(objectiveMet(homes())).toBe(true);
     w.counters.totalStructuresLost = 16;
     expect(homes().state).toBe('failed');
+    expect(objectiveMet(homes())).toBe(false);
     expect(expo().progress).toBe(0);
     const e = w.memory.exposure!;
     e.now = e.start * 0.75;

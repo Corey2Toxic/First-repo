@@ -216,11 +216,19 @@ export function objectives(w: World): Objective[] {
   }
 }
 
-/** How many of the charges stand met as things are (a limit or a hold counts while it has not been broken). */
+/**
+ * Does this charge stand met as things are? A target must have been reached; a limit counts until it
+ * is broken; an average must be held now. (Until release a limit stopped counting once three
+ * quarters of its allowance was used: a warden who lost 15 homes under "lose no more than 15" was
+ * shown "holding" on the charge panel and scored as having failed it.)
+ */
+export function objectiveMet(o: Objective): boolean {
+  if (o.kind === 'reach') return o.progress >= 1;
+  if (o.kind === 'limit') return o.state !== 'failed';
+  return o.state !== 'failed' && o.state !== 'behind';
+}
+
+/** How many of the charges stand met as things are. */
 export function objectivesMet(w: World): number {
-  let k = 0;
-  for (const o of objectives(w)) {
-    if (o.kind === 'reach' ? o.progress >= 1 : o.state !== 'failed' && o.state !== 'behind') k++;
-  }
-  return k;
+  return objectives(w).filter(objectiveMet).length;
 }

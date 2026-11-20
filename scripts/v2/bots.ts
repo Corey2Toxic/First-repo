@@ -28,7 +28,7 @@ import { INFRA, ZONE } from '../../src/sim/types.ts';
 import { distanceField } from '../../src/sim/gen/settle.ts';
 import { computeFireshed } from '../../src/sim/projection.ts';
 import { evaluateLegacy } from '../../src/sim/score.ts';
-import { objectives } from '../../src/sim/objectives.ts';
+import { objectiveMet, objectives } from '../../src/sim/objectives.ts';
 import { DX8, DY8 } from '../../src/sim/grid.ts';
 import { beaverSiteScore } from '../../src/sim/gen/wildlife.ts';
 
@@ -260,8 +260,8 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
     rxHa: w.counters.totalRx,
     exposure0: Math.round(exposure0 * 100),
     exposure1: Math.round((ex?.now ?? 0) * 100),
-    charges: obj.filter((o) => (o.kind === 'reach' ? o.progress >= 1 : o.state !== 'failed' && o.state !== 'behind')).length,
-    met: obj.map((o) => ((o.kind === 'reach' ? o.progress >= 1 : o.state !== 'failed' && o.state !== 'behind') ? '+' : '-') + o.id).join(' '),
+    charges: obj.filter(objectiveMet).length,
+    met: obj.map((o) => (objectiveMet(o) ? '+' : '-') + o.id).join(' '),
     read: obj.map((o) => o.id + ': ' + o.reading).join(' | '),
     deerKm2: +(w.herds.reduce((a, h) => a + h.n, 0) / (land / 100)).toFixed(1),
     deerSeries: w.stats.deer.filter((_: number, k: number) => k % 60 === 59).map((x: number) => +(x / (land / 100)).toFixed(1)).join(','),

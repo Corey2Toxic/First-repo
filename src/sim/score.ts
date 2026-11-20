@@ -9,7 +9,7 @@ import { vegetationSummary } from './systems/vegetation.ts';
 import { deerCount } from './systems/wildlife.ts';
 import { hazardIndex } from './systems/fuels.ts';
 import { distanceField } from './gen/settle.ts';
-import { objectives } from './objectives.ts';
+import { objectiveMet, objectives } from './objectives.ts';
 
 /** Mean fuel hazard of the land within 5 cells of standing homes (0–1). */
 export function homeHazard(w: World): number {
@@ -149,7 +149,7 @@ export function evaluateLegacy(w: World, reason: 'tenure' | 'dismissed' | 'bankr
   // the council's charge (9): what this valley asked of its warden in particular (v2; v1.x gave
   // every scenario the same goal). Three points for each charge met.
   const charges = objectives(w);
-  const metNow = charges.filter((o) => (o.kind === 'reach' ? o.progress >= 1 : o.state !== 'failed' && o.state !== 'behind'));
+  const metNow = charges.filter(objectiveMet);
   breakdown.push(['The council’s charge', 3 * metNow.length * (reason === 'tenure' ? 1 : served), charges.map((o) => `${metNow.includes(o) ? '✓' : '✗'} ${o.title}`).join(' · ')]);
 
   let score = breakdown.reduce((a, b) => a + b[1], 0);
