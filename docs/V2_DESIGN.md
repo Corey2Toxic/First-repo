@@ -219,7 +219,7 @@ valley was a quiet one. On four valleys over 20 years 1.1.1 put out 68 % of its 
 day, and each valley also had one to four fires over 1,000 ha, fires of up to 13 days, and up to 54
 homes lost (`V2_REPORT.md`, 6.3). The third row, the mechanism, holds on every valley.
 
-The council's charges were added during development and are not set out in this document. Six
+The council's charges were added during development and are not set out in this document. Five
 of the fifteen were re-set at release after bots showed them met by a passive warden or by nobody;
 the scenario table in the README has them as shipped, and `V2_REPORT.md` (9.1) says what each was
 and why it changed.

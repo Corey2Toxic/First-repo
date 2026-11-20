@@ -193,7 +193,7 @@ Order of work, with what each step taught:
     lower, and "do not let the danger grow" because wildfire thinned the fuel; wolves walked into
     Silent Woods on their own; two aspen charges could not be met by anything a warden does in a
     tenure; and a limit stopped counting at three quarters of its allowance while the panel showed
-    it holding. Six charges re-set, one counting rule fixed, and Silent Woods given the rule
+    it holding. Five charges re-set, one counting rule fixed, and Silent Woods given the rule
     beavers already had (no natural arrivals in a valley set up without them). Running 1.1.1's own
     bots on the same valleys also showed that 1.1.1 already rewarded stewardship; the report says
     so. Lesson: an objective is a claim about play and needs a script that fails it.

@@ -36,8 +36,12 @@ tested. What 2.0 changes:
   treatments, crews, outside incident teams, prescribed burns and home hardening all do what their
   descriptions say (several did not).
 
+Play it in the browser: <https://claude.ai/artifact/GbHLDu5jf2x5eb6QansStn> (the hosted single-file
+build; the page is private to its owner until shared), or run it locally as below.
+
 What was measured before and after, what was tried and abandoned, and what is still wrong:
-[`docs/V2_REPORT.md`](docs/V2_REPORT.md). Why it was designed this way:
+[`docs/V2_REPORT.md`](docs/V2_REPORT.md) (also as a page:
+<https://claude.ai/artifact/1joBBCwKHMLB4pw7Q19HtK>). Why it was designed this way:
 [`docs/V2_DESIGN.md`](docs/V2_DESIGN.md). The fire model and its evidence:
 [`docs/FIRE_MODEL.md`](docs/FIRE_MODEL.md).
 
