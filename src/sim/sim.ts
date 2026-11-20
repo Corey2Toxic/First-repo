@@ -5,13 +5,14 @@
  * and the sequence of player commands.
  */
 import { SUBSTEPS_PER_DAY, FACTIONS } from './types.ts';
-import type { Colony, Crew, FireEvent, Pack, Project } from './types.ts';
+import type { Colony, FireEvent, Pack } from './types.ts';
 import type { World } from './world.ts';
 import { generateWeather, newClimateYear, updateDanger } from './systems/climate.ts';
 import { dailyMoisture, medianFuelMoisture, refreshSoilCapacity } from './systems/moisture.ts';
 import { refreshSuitability, vegetationDaily, vegetationSummary } from './systems/vegetation.ts';
 import { dailyIgnitions, detectFires, fireBanActive, fireSubstep, weatherOnFires } from './systems/fire.ts';
 import type { FireStepHooks } from './systems/fire.ts';
+import type { CrewHooks } from './systems/crews.ts';
 import { smokeSubstep } from './systems/smoke.ts';
 import { crewsDaily, crewsSubstep } from './systems/crews.ts';
 import { holdBurns, maintainFuelbreaks, projectsDaily } from './systems/projects.ts';
@@ -25,12 +26,10 @@ import { makeEventHooks, monthlyDiscoveries } from './events.ts';
 import { homeHazard } from './score.ts';
 import { discover } from './notes.ts';
 
-export interface SimHooks extends FireStepHooks {
+export interface SimHooks extends FireStepHooks, CrewHooks {
   onNewDay?: (w: World) => void;
   onNewYear?: (w: World) => void;
   onIgnition?: (fe: FireEvent) => void;
-  onCrewRetreat?: (c: Crew, fe: FireEvent) => void;
-  onBurnIgnited?: (pr: Project, fe: FireEvent) => void;
   onDepredation?: (p: Pack) => void;
   onWolvesKilled?: (p: Pack, n: number) => void;
   onPackFormed?: (p: Pack, parent: Pack) => void;
@@ -154,7 +153,7 @@ export class Simulation {
     wildlifeDaily(w, this.hooks);
     townsDaily(w);
     dailyEconomy(w);
-    crewsDaily(w);
+    crewsDaily(w, this.hooks);
     projectsDaily(w);
     decayTreatments(w);
     // snowpack tracking (valley mean SWE, sampled)

@@ -264,7 +264,7 @@ export class MapRenderer {
       for (let i = 0; i < N; i++) {
         const o = i * 4;
         let fi = 0;
-        if (L.fire[i] === 1 && !hidden.has(L.fid[i])) fi = Math.min(1, 0.25 + L.fint[i] * 0.6);
+        if (L.fire[i] === 1 && !hidden.has(L.fid[i])) fi = Math.min(1, 0.22 + L.fint[i] * 0.2); // flame length (m) → glow
         f[o] = fi * 255;
         f[o + 1] = Math.min(255, Math.sqrt(Math.min(1, L.smoke[i])) * 255);
         f[o + 2] = Math.min(255, Math.max(L.fline[i], 0) * 255);

@@ -9,11 +9,14 @@
  */
 import { DX8, DY8, astar, clamp01 } from '../grid.ts';
 import { FIRE, INFRA, SUBSTEPS_PER_DAY } from '../types.ts';
-import type { Crew, FireEvent, Project } from '../types.ts';
+import type { AidTeam, Crew, FireEvent, Project } from '../types.ts';
 import { COST, WORK } from '../economyParams.ts';
 import type { World } from '../world.ts';
 import { igniteProjectBurn, projectWorkCell, completeProjectCell, burnWindowOpen } from './projects.ts';
 import { cellFuel } from './fuels.ts';
+import { FLAME_LIMIT } from './fire.ts';
+import { droughtSeverity } from './climate.ts';
+import { makeCrew } from '../gen/crews.ts';
 import type { CellFuel } from './fuels.ts';
 
 const HOURS = 24 / SUBSTEPS_PER_DAY;
@@ -167,7 +170,7 @@ function localPerimeter(w: World, fe: FireEvent, x: number, y: number, r: number
         const n = i + DY8[d] * w.W + DX8[d];
         if (L.fire[n] === FIRE.BURNING && L.fid[n] === fe.id) {
           adj = true;
-          danger = Math.max(danger, L.crown[n] ? 2 : L.fint[n]);
+          danger = Math.max(danger, L.crown[n] ? 99 : L.fint[n]);
         }
       }
       if (adj) out.push({ cell: i, danger });
@@ -176,7 +179,7 @@ function localPerimeter(w: World, fe: FireEvent, x: number, y: number, r: number
 }
 
 /** Nearest perimeter point of a fire to (x, y), scanning its burning cells. */
-function nearestPerimeter(w: World, fe: FireEvent, x: number, y: number, maxDanger = 0.85): number {
+function nearestPerimeter(w: World, fe: FireEvent, x: number, y: number, maxDanger: number = FLAME_LIMIT.hand): number {
   const L = w.L;
   let best = -1,
     bd = Infinity;
@@ -338,19 +341,71 @@ function roadGap(w: World, fe: FireEvent): number {
   return Math.max(0, Math.hypot((r % w.W) - cx, ((r / w.W) | 0) - cy) - rad);
 }
 
-/** Assign idle crews to fires that need them, by priority. */
+/**
+ * Open edge of every active fire: burning cells with unburned ground beside them that no line holds,
+ * and how many of those are advancing fronts. This is the work a fire still asks of its crews.
+ */
+export function openEdges(w: World): Map<number, { open: number; flaming: number }> {
+  const L = w.L;
+  const out = new Map<number, { open: number; flaming: number }>();
+  for (const b of w.burning) {
+    if (L.town[b] > 0) continue;
+    const bx = b % w.W,
+      by = (b / w.W) | 0;
+    let open = false;
+    for (let d = 0; d < 8 && !open; d++) {
+      const nx = bx + DX8[d],
+        ny = by + DY8[d];
+      if (!w.inside(nx, ny)) continue;
+      const n = ny * w.W + nx;
+      if (L.fire[n] === FIRE.NONE && L.water[n] < 2 && L.pond[n] <= 0.35 && L.fline[n] < 0.6 && L.flowAcc[n] <= 1000) open = true;
+    }
+    if (!open) continue;
+    let e = out.get(L.fid[b]);
+    if (!e) {
+      e = { open: 0, flaming: 0 };
+      out.set(L.fid[b], e);
+    }
+    e.open++;
+    if (L.fphase[b] === 0) e.flaming++;
+  }
+  return out;
+}
+
+/** How many crews of a kind a fire should have, from the edge it still has open. */
+function crewsWanted(fe: FireEvent, kind: Crew['kind'], open: number, townDist: number): number {
+  if (kind === 'hand') {
+    // "confine": hold the side toward homes only
+    if (fe.response === 'contain') return townDist > 20 ? 0 : 2;
+    return Math.max(2, Math.min(12, 1 + Math.ceil(open / 8))) + (fe.inBuffer ? 1 : 0);
+  }
+  if (kind === 'engine') return 2 + (fe.inBuffer ? 1 : 0);
+  return open > 60 ? 2 : 1;
+}
+
+/**
+ * Assign crews to fires that need them, by priority. v2: the number of crews follows the edge a fire
+ * still has open (v1.x sent one hand crew to anything under 64 ha), and crews are pulled from a fire
+ * that is lined or far less urgent when a more dangerous one is short (v1.x never moved a crew
+ * between fires: in one audited run every crew stayed on a backcountry fire while 62 homes burned).
+ * Mutual-aid crews work only the fire they were called for.
+ */
 export function autoDispatch(w: World): void {
   if (!w.policies.autoDispatch) return;
   const fires = w.fires.filter((f) => f.active && f.detected && f.response !== 'monitor' && f.cause !== 'prescribed');
   if (fires.length === 0) return;
+  const edges = openEdges(w);
   const scored = fires
     .map((fe) => {
       const th = fireThreat(w, fe);
+      const e = edges.get(fe.id) ?? { open: 0, flaming: 0 };
       // fires in a Community Buffer come first, whatever their size
-      return { fe, th, score: (fe.response === 'suppress' ? 1 : 0.5) * (40 / (5 + th.dist)) + Math.sqrt(fe.area) * 0.2 + (fe.inBuffer ? 25 : 0) };
+      const score = (fe.response === 'suppress' ? 1 : 0.5) * (40 / (5 + th.dist)) + Math.sqrt(fe.area) * 0.2 + (fe.inBuffer ? 25 : 0);
+      return { fe, th, e, score };
     })
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score || a.fe.id - b.fe.id);
   const assigned = (fe: FireEvent, kind: Crew['kind']) => w.crews.filter((c) => c.task?.fireId === fe.id && c.kind === kind).length;
+  const mayWork = (c: Crew, fe: FireEvent) => c.aid === undefined || c.aid === fe.id;
   // idle crews, crews heading home from a finished job, and crews on routine project work
   const isFree = (c: Crew) => {
     if (c.manual || c.fatigue > 0.95) return false;
@@ -359,21 +414,43 @@ export function autoDispatch(w: World): void {
     const pr = w.projects.find((p) => p.id === c.task!.projectId);
     return !(pr && pr.status === 'burning'); // never abandon a burn in progress
   };
+  const scoreOf = new Map<number, (typeof scored)[number]>();
+  for (const sc of scored) scoreOf.set(sc.fe.id, sc);
   const tried = new Set<Crew>();
-  // fires in priority order; each gets the nearest free crews of each kind (v1.0 went down the roster)
-  for (const { fe, th } of scored) {
+  // fires in priority order; each gets the nearest free crews of each kind
+  for (const { fe, th, e, score } of scored) {
     const cx = (fe.minX + fe.maxX) / 2,
       cy = (fe.minY + fe.maxY) / 2;
     for (const kind of ['hand', 'engine', 'heli'] as const) {
       if (kind === 'engine' && th.dist > 16 && !fe.inBuffer && roadGap(w, fe) > 6) continue; // engines defend homes and roadsides
-      if (fe.response === 'contain' && kind === 'hand' && th.dist > 20) continue;
-      const want = (kind === 'hand' ? Math.min(4, 1 + Math.floor(Math.sqrt(fe.area) / 8)) : kind === 'engine' ? 2 : 1) + (fe.inBuffer && kind !== 'heli' ? 1 : 0);
+      const want = crewsWanted(fe, kind, e.open, th.dist);
       let have = assigned(fe, kind);
       while (have < want) {
         let best: Crew | null = null,
           bd = Infinity;
         for (const c of w.crews) {
-          if (c.kind !== kind || tried.has(c) || !isFree(c)) continue;
+          if (c.kind !== kind || tried.has(c) || !isFree(c) || !mayWork(c, fe)) continue;
+          const d = Math.hypot(c.x - cx, c.y - cy);
+          if (d < bd) {
+            bd = d;
+            best = c;
+          }
+        }
+        if (!best) break;
+        tried.add(best);
+        if (assignToFire(w, best, fe)) have++;
+      }
+      // still short of a working minimum: take crews off a fire that is lined, or far less urgent
+      const floor = Math.min(want, kind === 'hand' ? 2 : 1);
+      while (have < floor) {
+        let best: Crew | null = null,
+          bd = Infinity;
+        for (const c of w.crews) {
+          if (c.kind !== kind || c.manual || tried.has(c) || c.aid !== undefined || c.task?.kind !== 'suppress' || c.task.fireId === fe.id) continue;
+          const other = scoreOf.get(c.task.fireId!);
+          if (!other) continue;
+          const lined = other.e.open === 0;
+          if (!lined && other.score > score * 0.5) continue;
           const d = Math.hypot(c.x - cx, c.y - cy);
           if (d < bd) {
             bd = d;
@@ -394,10 +471,11 @@ export function autoDispatch(w: World): void {
  * roster for weeks on smouldering fires).
  */
 function releaseFromContainedFires(w: World): void {
-  const flaming = new Map<number, number>();
-  for (const b of w.burning) if (w.L.fphase[b] === 0) flaming.set(w.L.fid[b], (flaming.get(w.L.fid[b]) ?? 0) + 1);
+  const edges = openEdges(w);
   for (const fe of w.fires) {
-    if (!fe.active || fe.cause === 'prescribed' || (flaming.get(fe.id) ?? 0) > 0 || fe.containment < 0.9) continue;
+    if (!fe.active || fe.cause === 'prescribed') continue;
+    const e = edges.get(fe.id);
+    if (e && (e.flaming > 0 || e.open > 2)) continue;
     const on = w.crews.filter((c) => c.task?.fireId === fe.id && !c.manual).sort((a, b) => a.id - b.id);
     const keep = on.find((c) => c.kind === 'hand') ?? null;
     for (const c of on) if (c !== keep) goHome(w, c);
@@ -407,7 +485,7 @@ function releaseFromContainedFires(w: World): void {
 /** Give idle hand crews queued projects (fires take precedence). */
 export function assignProjects(w: World): void {
   for (const c of w.crews) {
-    if (c.state !== 'idle' || c.kind !== 'hand' || c.fatigue > 0.95) continue;
+    if (c.state !== 'idle' || c.kind !== 'hand' || c.fatigue > 0.95 || c.aid !== undefined) continue;
     const pr = w.projects.find((p) => (p.status === 'queued' || p.status === 'waiting') && !w.crews.some((o) => o.task?.projectId === p.id));
     if (!pr) return;
     const cell = projectWorkCell(w, pr, crewCell(w, c));
@@ -424,6 +502,9 @@ export function assignProjects(w: World): void {
 export interface CrewHooks {
   onCrewRetreat?: (c: Crew, fe: FireEvent) => void;
   onBurnIgnited?: (pr: Project, fe: FireEvent) => void;
+  onAidRequested?: (team: AidTeam, fe: FireEvent) => void;
+  onAidArrived?: (team: AidTeam, fe: FireEvent) => void;
+  onAidReleased?: (team: AidTeam, fe: FireEvent | undefined) => void;
 }
 
 /**
@@ -478,7 +559,8 @@ export function crewsSubstep(w: World, hooks: CrewHooks = {}): void {
   }
 }
 
-function chargeFire(w: World, fe: FireEvent | undefined, hours: number, kind: Crew['kind']): void {
+function chargeFire(w: World, fe: FireEvent | undefined, hours: number, kind: Crew['kind'], aid = false): void {
+  if (aid) return; // an outside team is paid by the day (aidDaily)
   const rate = COST.suppressionHour * (kind === 'heli' ? 3.5 : kind === 'engine' ? 1.2 : 1);
   const amt = rate * hours;
   w.spend('Suppression', amt);
@@ -507,14 +589,16 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
   // night: helicopters are grounded; hand crews keep working a small fire through its first night
   // (initial attack — the calm, damp night is the best time to hold it) but rest on large ones;
   // engines keep defending houses
-  const initialAttack = fe.area <= 40 && c.fatigue < 0.75;
+  // (v2: the night shift works any fire, at reduced output, until the crew is spent: night is when a
+  // fire lies down and line holds)
+  const initialAttack = c.fatigue < 0.8;
   // crews that hold position overnight are resting, and recover (v1.0 counted them as working)
   if ((!day && c.kind === 'heli') || (!day && c.kind === 'hand' && !initialAttack)) {
     c.state = 'resting';
     return;
   }
   if (c.kind === 'heli') return heliTick(w, c, fe, hours);
-  chargeFire(w, fe, hours, c.kind);
+  chargeFire(w, fe, hours, c.kind, c.aid !== undefined);
   c.hoursWorked += hours;
   if (c.kind === 'engine') {
     // direct attack on low-intensity fire within hose reach, working along the edge ("pump and
@@ -535,7 +619,7 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
             y = cy + dy;
           if (!w.inside(x, y)) continue;
           const i = y * w.W + x;
-          if (L.fire[i] !== FIRE.BURNING || L.fid[i] !== fe.id || L.fint[i] >= 0.6 || L.town[i] > 0) continue;
+          if (L.fire[i] !== FIRE.BURNING || L.fid[i] !== fe.id || L.fint[i] >= FLAME_LIMIT.engine || L.town[i] > 0) continue;
           const dd = dx * dx + dy * dy;
           if (dd < bd) {
             bd = dd;
@@ -558,7 +642,7 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
     // nothing in reach: drive to the road nearest the fire's edge — unless holding a threatened town
     const th = fireThreat(w, fe);
     if (done === 0 && th.dist > 6) {
-      const edge = nearestPerimeter(w, fe, c.x, c.y, 0.6);
+      const edge = nearestPerimeter(w, fe, c.x, c.y, FLAME_LIMIT.engine);
       const goal = edge >= 0 ? nearestRoadTo(w, edge % w.W, (edge / w.W) | 0) : nearestRoadTo(w, (fe.minX + fe.maxX) / 2, (fe.minY + fe.maxY) / 2);
       if (goal !== crewCell(w, c)) planPath(w, c, goal);
     }
@@ -574,7 +658,7 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
     py = cy;
   let guard = 0;
   while (budget > 0 && guard++ < 30) {
-    const cand = localPerimeter(w, fe, px, py, 3).filter((p) => p.danger <= 0.85 && L.fline[p.cell] < 0.6);
+    const cand = localPerimeter(w, fe, px, py, 3).filter((p) => p.danger <= FLAME_LIMIT.hand && L.fline[p.cell] < 0.6);
     if (cand.length === 0) break;
     cand.sort((a, b) => {
       const da = Math.hypot((a.cell % w.W) + 0.5 - px, ((a.cell / w.W) | 0) + 0.5 - py);
@@ -597,7 +681,7 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
         y = Math.floor(py) + dy;
       if (!w.inside(x, y)) continue;
       const i = y * w.W + x;
-      if (L.fire[i] === FIRE.BURNING && L.fid[i] === fe.id && L.fint[i] < 0.3) {
+      if (L.fire[i] === FIRE.BURNING && L.fid[i] === fe.id && L.fint[i] < 0.6) {
         extinguish(w, i);
         mop--;
       }
@@ -607,7 +691,7 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
   // nothing workable nearby? relocate along the perimeter, or retreat from crown fire
   if (built === 0) {
     const near = localPerimeter(w, fe, cx, cy, 3);
-    if (near.some((p) => p.danger > 0.85)) {
+    if (near.some((p) => p.danger > FLAME_LIMIT.hand)) {
       if (hooks.onCrewRetreat) hooks.onCrewRetreat(c, fe);
     }
     const goal = nearestPerimeter(w, fe, cx, cy);
@@ -644,7 +728,7 @@ function heliTick(w: World, c: Crew, fe: FireEvent, hours: number): void {
   if (water < 0) return; // no dip site within range
   const dist = Math.hypot((water % w.W) - cx, ((water / w.W) | 0) - cy);
   const drops = Math.round((dist < 6 ? WORK.drops.near : dist < 14 ? WORK.drops.far : 1) * (hours / HOURS));
-  chargeFire(w, fe, hours, 'heli');
+  chargeFire(w, fe, hours, 'heli', c.aid !== undefined);
   c.hoursWorked += hours;
   // target the hottest edge nearest a threatened town, else the head of the fire
   const th = fireThreat(w, fe);
@@ -663,7 +747,7 @@ function heliTick(w: World, c: Crew, fe: FireEvent, hours: number): void {
         const i = (by + dy) * w.W + bx + dx;
         L.wet[i] = Math.max(L.wet[i], 0.85);
         if (L.fire[i] === FIRE.BURNING) {
-          if (L.fint[i] < 0.75 && !L.crown[i]) extinguish(w, i);
+          if (L.fint[i] < FLAME_LIMIT.engine && !L.crown[i]) extinguish(w, i);
           else L.fint[i] *= 0.6;
         }
       }
@@ -765,8 +849,116 @@ function projectTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
   }
 }
 
+// ------------------------------------------------------------ mutual aid (v2)
+/** What an outside incident team brings. */
+export const AID_TEAM: ReadonlyArray<[Crew['kind'], string]> = [
+  ['hand', 'Ridgeline Hotshots'],
+  ['hand', 'Sawtooth Hotshots'],
+  ['hand', 'Cinder Butte Crew'],
+  ['hand', 'Three Rivers Crew'],
+  ['engine', 'Strike Engine 41'],
+  ['engine', 'Strike Engine 52'],
+  ['heli', 'Helitack 7'],
+];
+/** At most this many teams can be in the valley at once: the region has other fires. */
+export const AID_MAX_TEAMS = 2;
+
+export function aidFor(w: World, fireId: number): AidTeam | undefined {
+  return w.aid.find((a) => a.fireId === fireId && !a.released);
+}
+
+/** Why a team cannot be called to this fire now, or '' if it can. */
+export function aidProblem(w: World, fe: FireEvent | undefined): string {
+  if (!fe || !fe.active) return 'That fire is out.';
+  if (!fe.detected) return 'No one knows about that fire yet.';
+  if (fe.cause === 'prescribed') return 'A prescribed burn is held by its own crews.';
+  if (aidFor(w, fe.id)) return 'A team is already assigned to that fire.';
+  if (w.aid.filter((a) => !a.released).length >= AID_MAX_TEAMS) return 'No more teams are available: the region has other fires.';
+  return '';
+}
+
+/**
+ * Call an outside incident team to a fire. It reports the next morning (the morning after if called
+ * in the evening; a day later still when drought has the whole region burning), works only that
+ * fire, and is paid by the day until it is released.
+ */
+export function requestAid(w: World, fe: FireEvent, auto = false): AidTeam {
+  const stretched = droughtSeverity(w.climate.droughtIndex) > 0.75 ? 1 : 0;
+  const team: AidTeam = { fireId: fe.id, requestedDay: w.day, arriveDay: w.day + (w.sub <= 5 ? 1 : 2) + stretched, arrived: false, released: false, releasedDay: -1, crewIds: [], cost: COST.aidMobilize, auto };
+  w.aid.push(team);
+  w.spend('Mutual aid', COST.aidMobilize);
+  fe.cost += COST.aidMobilize;
+  return team;
+}
+
+export function releaseAid(w: World, team: AidTeam): void {
+  if (team.released) return;
+  team.released = true;
+  team.releasedDay = w.day;
+  for (let k = w.crews.length - 1; k >= 0; k--) if (team.crewIds.includes(w.crews[k].id)) w.crews.splice(k, 1);
+}
+
+/** Standing order: call a team when an escaped fire threatens a town (policy mutualAid 'auto'). */
+function autoAidWanted(w: World, fe: FireEvent, open: number): boolean {
+  if (fe.response === 'monitor' || fe.cause === 'prescribed' || !fe.detected) return false;
+  if (fe.area < 150 || open < 15) return false;
+  return fireThreat(w, fe).dist < 45 || fe.inBuffer === true;
+}
+
+function aidDaily(w: World, hooks: CrewHooks): void {
+  const edges = openEdges(w);
+  for (const team of w.aid) {
+    if (team.released) continue;
+    const fe = fireById(w, team.fireId);
+    const e = edges.get(team.fireId);
+    // demobilise when the fire is out, or lined and quiet
+    if (!fe || !fe.active || (team.arrived && (!e || (e.flaming === 0 && e.open <= 2)))) {
+      releaseAid(w, team);
+      if (hooks.onAidReleased) hooks.onAidReleased(team, fe);
+      continue;
+    }
+    if (!team.arrived && w.day >= team.arriveDay) {
+      team.arrived = true;
+      // report at the station nearest the fire
+      const cx = (fe.minX + fe.maxX) / 2,
+        cy = (fe.minY + fe.maxY) / 2;
+      let st = w.towns[0]?.station ?? 0,
+        bd = Infinity;
+      for (const t of w.towns) {
+        const d = Math.hypot(t.x - cx, t.y - cy);
+        if (d < bd) {
+          bd = d;
+          st = t.station;
+        }
+      }
+      for (const [kind, name] of AID_TEAM) {
+        const c = makeCrew(w, kind, st, name);
+        c.aid = fe.id;
+        w.crews.push(c);
+        team.crewIds.push(c.id);
+      }
+      if (hooks.onAidArrived) hooks.onAidArrived(team, fe);
+    }
+    if (team.arrived) {
+      w.spend('Mutual aid', COST.aidPerDay);
+      team.cost += COST.aidPerDay;
+      fe.cost += COST.aidPerDay;
+    }
+  }
+  if (w.policies.mutualAid === 'auto') {
+    for (const fe of w.fires) {
+      if (!fe.active || aidProblem(w, fe)) continue;
+      if (autoAidWanted(w, fe, edges.get(fe.id)?.open ?? 0)) {
+        const team = requestAid(w, fe, true);
+        if (hooks.onAidRequested) hooks.onAidRequested(team, fe);
+      }
+    }
+  }
+}
+
 /** Daily bookkeeping: dispatch, recall crews from finished fires, project assignment. */
-export function crewsDaily(w: World): void {
+export function crewsDaily(w: World, hooks: CrewHooks = {}): void {
+  aidDaily(w, hooks);
   releaseFromContainedFires(w);
   autoDispatch(w);
   assignProjects(w);

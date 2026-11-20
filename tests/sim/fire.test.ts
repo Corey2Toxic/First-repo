@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { flatWorld } from '../helpers.ts';
-import { applyFireEffects, fireSubstep, grassHeadRateKmh, lengthToBreadth, moistureDamping, projectContains, startFire, surfaceHeadRate } from '../../src/sim/systems/fire.ts';
+import { applyFireEffects, currentSpreadEnv, fireSubstep, grassHeadRateKmh, lengthToBreadth, moistureDamping, projectContains, startFire, surfaceHeadRate } from '../../src/sim/systems/fire.ts';
 import { cellFuel } from '../../src/sim/systems/fuels.ts';
 import { createProject, igniteProjectBurn } from '../../src/sim/systems/projects.ts';
 import { FIRE } from '../../src/sim/types.ts';
@@ -249,10 +249,10 @@ describe('fire behaviour', () => {
     // no wind: isotropic; the front should cover ~R·t, not several times it (v1.0: 3.7x)
     const w0 = flatWorld(10, 10, { grass: 0.85, litter: 0.4 });
     w0.weather.windSpeed = 0.3;
+    w0.sub = 4;
     const f = cellFuel(w0, 55);
-    const di = 1.16; // diurnal spread factor at 15:00
-    const fm = w0.L.fm[55] - 0.015 + f.green * (0.06 + 0.06 * f.grassShare);
-    const spec = surfaceHeadRate(w0, 55, f, 0.3 * 1.26) * moistureDamping(fm / (0.15 + 0.13 * (1 - f.grassShare))) * di;
+    const env = currentSpreadEnv(w0);
+    const spec = surfaceHeadRate(w0, 55, f, env.windEff, w0.L.fm[55] + env.fmAdd) * env.spread;
     let sum = 0;
     const n = 8;
     for (let k = 0; k < n; k++) {

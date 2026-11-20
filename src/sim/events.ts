@@ -78,6 +78,23 @@ export function makeEventHooks(w: World): SimHooks {
       if (once(`loss${fe.id}:${w.day}`)) w.notify(`Homes are burning in ${t?.name ?? 'town'}! (${fe.name})`, 'danger', cell % w.W, (cell / w.W) | 0, fe.id);
       discover(w, 'wui');
     },
+    onAidRequested(team, fe) {
+      const wait = team.arriveDay - w.day;
+      const when = wait <= 1 ? 'tomorrow morning' : 'in ' + wait + ' days';
+      const who = team.auto ? 'Standing order: an' : 'An';
+      w.notify(who + ' outside incident team has been called to the ' + fe.name + '. It reports ' + when + '.', 'warn', fe.originX, fe.originY, fe.id);
+    },
+    onAidArrived(_team, fe) {
+      w.notify('The incident team has arrived for the ' + fe.name + ': four hand crews, two engines and a helicopter.', 'good', fe.originX, fe.originY, fe.id);
+    },
+    onAidReleased(team, fe) {
+      const days = Math.max(1, team.releasedDay - team.arriveDay);
+      const name = fe ? fe.name : 'fire';
+      const span = days + (days > 1 ? ' days' : ' day');
+      const bill = '$' + Math.round(team.cost / 1000) + 'k';
+      w.notify('The incident team has left the ' + name + ' after ' + span + ': ' + bill + '.', 'info');
+      if (fe) w.record('fire', 'An outside incident team worked the ' + name + ' for ' + span + ', at a cost of ' + bill + '.', 2, fe.originX, fe.originY);
+    },
     onEscape(fe: FireEvent) {
       w.memory.recentEscapes = (w.memory.recentEscapes ?? 0) + 1;
       shock(w, 'residents', -7, 'Escaped prescribed burn');

@@ -6,6 +6,7 @@
  */
 import { Rng } from './rng.ts';
 import type {
+  AidTeam,
   ChronicleEntry,
   ClimateState,
   Colony,
@@ -75,10 +76,10 @@ export const LAYER_SPECS = {
   lastLogged: 'f32', // absolute year of last harvest
   // --- active fire ---
   fire: 'u8', // FIRE.*
-  fint: 'f32', // fire intensity (0..~2)
+  fint: 'f32', // flame length now, m (v1.x: an intensity proxy 0..~2)
   ftime: 'f32', // remaining burn hours
   fid: 'i32', // fire event id (-1 none)
-  fpeak: 'f32', // peak intensity during the current burn (sets severity)
+  fpeak: 'f32', // peak flame length during the current burn, m (sets severity)
   fphase: 'u8', // 0 flaming front, 1 smouldering
   crown: 'u8', // 1 if crowning
   fline: 'f32', // fireline/containment strength 0..1
@@ -102,6 +103,8 @@ export const LAYER_SPECS = {
   // --- v1.1 (appended: save files are keyed by name) ---
   standAge: 'f32', // years since the last stand-replacing disturbance (old growth)
   dstress: 'f32', // multi-year drought memory (~2-year moving average of drought stress)
+  // --- v2 ---
+  fprog: 'f32', // fraction of the way an approaching fire front has come to this cell's centre
 } as const satisfies Record<string, LayerType>;
 
 export type LayerName = keyof typeof LAYER_SPECS;
@@ -330,6 +333,8 @@ export class World {
   herds: Herd[] = [];
   packs: Pack[] = [];
   colonies: Colony[] = [];
+  /** Outside incident teams called to fires (v2). */
+  aid: AidTeam[] = [];
   towers: number[] = []; // cell indices
   camps: number[] = [];
   /** Burning cells in ignition order (kept sorted each sub-step for determinism) */
@@ -492,6 +497,7 @@ export class World {
       autoDispatch: true,
       salvage: false,
       smokeRules: false,
+      mutualAid: 'auto',
     };
     const approvals = {} as Record<FactionId, number[]>;
     for (const f of FACTIONS) approvals[f] = [];

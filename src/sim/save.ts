@@ -60,6 +60,8 @@ const STATE_KEYS = [
   'burning',
   'smokePresent',
   'commandLog',
+  // v2
+  'aid',
 ] as const;
 
 /** Object-valued state merged over the defaults of a fresh World on load. */

@@ -104,7 +104,7 @@ export class AudioEngine {
       if (hidden.has(w.L.fid[b])) continue;
       const dx = (b % w.W) - cam.cx,
         dy = ((b / w.W) | 0) - cam.cy;
-      if (dx * dx + dy * dy < r * r) near += w.L.fint[b];
+      if (dx * dx + dy * dy < r * r) near += Math.min(2, w.L.fint[b] * 0.5);
     }
     const zoomBoost = Math.min(1, cam.scale / 14);
     const fl = Math.min(1, near / 25) * zoomBoost;

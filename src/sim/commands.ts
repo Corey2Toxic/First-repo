@@ -8,7 +8,7 @@ import { FIRE, INFRA, SP, ZONE } from './types.ts';
 import type { CrewKind, FireResponse, Policies, ProjectKind } from './types.ts';
 import { COST, CREW_COST } from './economyParams.ts';
 import { cancelProject, createProject, zoneConflict } from './systems/projects.ts';
-import { assignToFire, crewCell, fireById, planPath, releaseProject } from './systems/crews.ts';
+import { aidFor, aidProblem, assignToFire, crewCell, fireById, planPath, releaseAid, releaseProject, requestAid } from './systems/crews.ts';
 import { makeCrew } from './gen/crews.ts';
 import { layRoad, roadCost } from './gen/settle.ts';
 import { beaverSiteScore } from './gen/wildlife.ts';
@@ -27,6 +27,8 @@ export type Command =
   | { t: 'recallCrew'; crewId: number }
   | { t: 'fireline'; cells: number[]; crewId?: number }
   | { t: 'airdrop'; cells: number[] }
+  /** Call (on) or send home (off) an outside incident team for a fire. */
+  | { t: 'aid'; fireId: number; on: boolean }
   | { t: 'build'; what: 'tower' | 'camp'; cell: number }
   | { t: 'road'; from: number; to: number }
   | { t: 'hire'; kind: CrewKind; townId?: number }
@@ -54,6 +56,8 @@ export function estimateCost(w: World, cmd: Command): number {
   switch (cmd.t) {
     case 'airdrop':
       return Math.ceil(new Set(cmd.cells).size / 10) * COST.retardantDrop;
+    case 'aid':
+      return cmd.on ? COST.aidMobilize : 0;
     case 'build':
       return cmd.what === 'tower' ? COST.tower : COST.camp;
     case 'hire':
@@ -92,6 +96,7 @@ export const POLICY_VALUES: { [K in keyof Policies]: ReadonlyArray<Policies[K]> 
   autoDispatch: [false, true],
   salvage: [false, true],
   smokeRules: [false, true],
+  mutualAid: ['auto', 'manual'],
 };
 const PROJECT_KINDS: readonly ProjectKind[] = ['thin', 'burn', 'plant', 'fuelbreak'];
 const RESPONSES: readonly FireResponse[] = ['suppress', 'contain', 'monitor'];
@@ -127,6 +132,8 @@ export function validateCommand(w: World, cmd: Command): string | null {
     case 'fireResponse':
       if (!RESPONSES.includes(cmd.response)) return 'Unknown response.';
       return isId(cmd.fireId) ? null : 'Invalid fire.';
+    case 'aid':
+      return isId(cmd.fireId) && typeof cmd.on === 'boolean' ? null : 'Invalid request.';
     case 'sendCrew':
       if (!isId(cmd.crewId)) return 'Invalid crew.';
       if (cmd.fireId !== undefined && !isId(cmd.fireId)) return 'Invalid fire.';
@@ -216,9 +223,29 @@ function apply(w: World, cmd: Command): CommandResult {
       if (cmd.response === 'monitor') for (const c of w.crews) if (c.task?.fireId === fe.id && !c.manual) c.task = null;
       return { ok: true, msg: `${fe.name}: response set to ${cmd.response}.` };
     }
+    case 'aid': {
+      const fe = fireById(w, cmd.fireId);
+      if (!cmd.on) {
+        const team = aidFor(w, cmd.fireId);
+        if (!team) return fail('No team is assigned to that fire.');
+        releaseAid(w, team);
+        return { ok: true, msg: 'The incident team has been sent home' + (fe ? ' from the ' + fe.name : '') + '.' };
+      }
+      const problem = aidProblem(w, fe);
+      if (problem || !fe) return fail(problem || 'That fire is out.');
+      const team = requestAid(w, fe);
+      const wait = team.arriveDay - w.day;
+      const when = wait <= 1 ? 'tomorrow morning' : 'in ' + wait + ' days';
+      return {
+        ok: true,
+        msg: 'Incident team called to the ' + fe.name + ': it reports ' + when + '. $' + COST.aidMobilize / 1000 + 'k now, $' + COST.aidPerDay / 1000 + 'k a day.',
+        cost: COST.aidMobilize,
+      };
+    }
     case 'sendCrew': {
       const c = w.crews.find((x) => x.id === cmd.crewId);
       if (!c) return fail('No such crew.');
+      if (c.aid !== undefined && cmd.fireId !== c.aid) return fail(c.name + ' was sent for one fire only.');
       const held = c.task?.projectId !== undefined ? w.projects.find((p) => p.id === c.task!.projectId) : undefined;
       if (held && held.status === 'burning') return fail(`${c.name} is holding a burn and cannot leave.`);
       if (cmd.fireId !== undefined) {
@@ -295,7 +322,7 @@ function apply(w: World, cmd: Command): CommandResult {
       const cost = drops * COST.retardantDrop;
       for (const i of cells) {
         L.retard[i] = 1;
-        if (L.fire[i] === FIRE.BURNING && L.fint[i] < 0.9) L.fint[i] *= 0.4;
+        if (L.fire[i] === FIRE.BURNING && L.fint[i] < 3.4) L.fint[i] *= 0.4;
       }
       w.spend('Aviation', cost);
       w.dirty.infra++;
@@ -345,6 +372,7 @@ function apply(w: World, cmd: Command): CommandResult {
       const k = w.crews.findIndex((c) => c.id === cmd.crewId);
       if (k < 0) return fail('No such crew.');
       const c = w.crews[k];
+      if (c.aid !== undefined) return fail(c.name + ' belongs to an outside team: send the team home instead.');
       if (c.state !== 'idle') return fail(`${c.name} is out on assignment.`);
       w.crews.splice(k, 1);
       return { ok: true, msg: `${c.name} disbanded.` };

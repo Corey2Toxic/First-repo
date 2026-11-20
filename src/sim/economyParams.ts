@@ -20,7 +20,9 @@ export const COST = {
   wolfReintro: 60_000,
   beaverRelocation: 9_000,
   suppressionHour: 850, // per crew-hour of overtime on a fire
-  pileBurnPerHa: 120, // extra when slash is piled and burned
+  pileBurnPerHa: 120, // extra when harvest slash is piled and burned
+  aidMobilize: 60_000, // calling an outside incident team to a fire
+  aidPerDay: 55_000, // per day the team is assigned
 };
 
 export const CREW_COST = {

@@ -338,7 +338,7 @@ export class OverlayRenderer {
     const n = Math.min(40, Math.ceil(w.burning.length * 0.05));
     for (let k = 0; k < n; k++) {
       const b = w.burning[(Math.random() * w.burning.length) | 0];
-      if (hidden.has(L.fid[b]) || L.fint[b] < 0.3) continue;
+      if (hidden.has(L.fid[b]) || L.fint[b] < 0.8) continue;
       const wx = (b % w.W) + Math.random(),
         wy = ((b / w.W) | 0) + Math.random();
       const [x, y] = cam.worldToScreen(wx, wy);

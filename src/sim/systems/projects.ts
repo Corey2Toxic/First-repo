@@ -21,9 +21,10 @@ export const PROJECT_NAMES: Record<ProjectKind, string> = {
 };
 
 export function projectCostPerCell(kind: ProjectKind, w?: World): number {
-  const base = kind === 'thin' ? COST.thin : kind === 'burn' ? COST.burn : kind === 'plant' ? COST.plant : COST.fuelbreak;
-  const extra = kind === 'thin' && w?.policies.slash === 'pileburn' ? COST.pileBurnPerHa : 0;
-  return base + extra;
+  // (v2: a fuel treatment disposes of its own slash and its price includes that; the slash policy
+  // governs the mill's harvest only)
+  void w;
+  return kind === 'thin' ? COST.thin : kind === 'burn' ? COST.burn : kind === 'plant' ? COST.plant : COST.fuelbreak;
 }
 
 /** Which cells of a selection a project may treat. */
@@ -142,8 +143,11 @@ export function applyThinning(w: World, i: number): void {
   L.fir[i] *= youngF ? 0.15 : 0.6;
   L.pine[i] *= youngP ? 0.35 : 0.82;
   L.aspen[i] *= 0.9;
-  const slash = 10 + 8 * (L.pine[i] + L.fir[i]);
-  L.slash[i] += w.policies.slash === 'pileburn' ? slash * 0.25 : slash;
+  // The crew chips or piles and burns what it cuts: a little residue is left and the ladder is gone.
+  // (v1.x left 10-18 t/ha of slash by default, so a thinned stand burned hotter and crowned more
+  // readily for 4-10 years while counting as treated.)
+  L.slash[i] += 1.5;
+  L.dead[i] *= 0.8;
   L.lastTreat[i] = w.yearF;
   // thinned stands: older, fewer, bigger trees → mean ages rise
   if (youngF) L.ageF[i] = Math.max(L.ageF[i], 45);
@@ -265,7 +269,7 @@ export function igniteProjectBurn(w: World, pr: Project): FireEvent | null {
     pr.status = 'cancelled'; // built over before it could be burned
     return null;
   }
-  for (const c of unitRing(w, pr)) L.fline[c] = Math.max(L.fline[c], 0.9);
+  for (const c of unitRing(w, pr)) L.fline[c] = 1;
   // light a pattern of ignition points across the unit
   const r = w.rng.fire;
   let fe: FireEvent | null = null;
@@ -277,7 +281,7 @@ export function igniteProjectBurn(w: World, pr: Project): FireEvent | null {
       if (fe) {
         fe.name = pr.label.replace(/^Prescribed burn near /, '').replace(/ \(\d+ ha\)$/, '') + ' Rx Burn';
       }
-    } else if (r.next() < 0.8) igniteCell(w, c, fe, 0.15, false);
+    } else if (r.next() < 0.8) igniteCell(w, c, fe, 0.4, false);
   }
   if (!fe) return null;
   pr.status = 'burning';
@@ -304,7 +308,7 @@ export function projectsDaily(w: World): void {
     if (pr.burnDays <= 4 && w.weather.dangerClass <= 2 && w.weather.windSpeed < 8) {
       // strip-ignite more of the unit
       const unburned = pr.unit.filter((c) => L.fire[c] === FIRE.NONE && w.yearF - L.lastBurn[c] > 0.2);
-      for (let k = 0; k < unburned.length; k += 6) igniteCell(w, unburned[k], fe, 0.14, false);
+      for (let k = 0; k < unburned.length; k += 6) igniteCell(w, unburned[k], fe, 0.4, false);
     }
   }
 }
@@ -322,7 +326,9 @@ function finishBurn(w: World, pr: Project): void {
   pr.todo = [];
   pr.status = 'done';
   pr.doneDay = w.day;
-  const cost = pr.costPerCell * pr.unit.length;
+  // charged for the ground that burned, plus the line and the standby for the rest
+  // (v1.x billed the whole unit when a median 41 % of it burned)
+  const cost = pr.costPerCell * burned + 0.15 * pr.costPerCell * (pr.unit.length - burned);
   w.spend('Fuel treatments', cost);
   pr.spent += cost;
   w.counters.yearRxBurned += burned;
@@ -341,7 +347,7 @@ export function holdBurns(w: World): void {
     for (const b of w.burning) {
       if (L.fid[b] !== pr.fireId) continue;
       if (projectContains(w, pr.id, b)) continue;
-      if (r.next() < 0.3 * holding && L.fint[b] < 0.8) {
+      if (r.next() < 0.3 * holding && L.fint[b] < 1.5) {
         L.ftime[b] = Math.min(L.ftime[b], 0.01);
         L.fint[b] = 0.05;
       }

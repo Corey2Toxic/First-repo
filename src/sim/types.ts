@@ -118,6 +118,24 @@ export interface Crew {
   hoursWorked: number;
   /** Player issued (manual) task vs automatic dispatch */
   manual: boolean;
+  /** Mutual-aid crew: the id of the fire it was sent for (it works no other and leaves when released). */
+  aid?: number;
+}
+
+/** An outside incident team called to one fire (v2). */
+export interface AidTeam {
+  fireId: number;
+  requestedDay: number;
+  /** day the team reports at the station nearest the fire */
+  arriveDay: number;
+  arrived: boolean;
+  released: boolean;
+  releasedDay: number;
+  crewIds: number[];
+  /** paid so far */
+  cost: number;
+  /** requested by the standing policy rather than by the warden */
+  auto: boolean;
 }
 
 export type ProjectKind = 'thin' | 'burn' | 'plant' | 'fuelbreak';
@@ -280,6 +298,8 @@ export interface Policies {
   autoDispatch: boolean;
   salvage: boolean;
   smokeRules: boolean;
+  /** v2: 'auto' calls an outside incident team when an escaped fire threatens a town; 'manual' leaves it to the warden. */
+  mutualAid: 'auto' | 'manual';
 }
 
 export interface Petition {
