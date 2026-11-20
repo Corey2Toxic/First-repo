@@ -1255,6 +1255,9 @@ function burnout(w: World, i: number, fe: FireEvent | undefined, hooks: FireStep
   if (sev === 3) {
     w.counters.yearBurnedHigh++;
     w.counters.totalHighSeverity++;
+  } else if (fe && fe.cause !== 'prescribed' && fe.response !== 'suppress') {
+    // a wildfire the warden chose to confine or to watch, doing a prescribed burn's work
+    w.counters.totalManagedGood++;
   }
 }
 

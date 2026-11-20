@@ -30,8 +30,9 @@ import { computeFireshed } from '../../src/sim/projection.ts';
 import { evaluateLegacy } from '../../src/sim/score.ts';
 import { objectives } from '../../src/sim/objectives.ts';
 import { DX8, DY8 } from '../../src/sim/grid.ts';
+import { beaverSiteScore } from '../../src/sim/gen/wildlife.ts';
 
-type Strategy = 'passive' | 'firefight' | 'steward' | 'neglect';
+type Strategy = 'passive' | 'firefight' | 'steward' | 'neglect' | 'rewilder';
 const ALL: Strategy[] = ['passive', 'firefight', 'steward', 'neglect'];
 
 function townDist(w: World) {
@@ -140,6 +141,43 @@ function stewardTreat(w: World, kind: 'burn' | 'thin', budget: number): number {
   return spent;
 }
 
+/**
+ * The rewilder's yearly round: wolves released in the most remote country when the valley has none,
+ * beaver families moved to the best free reaches until four colonies stand. No work on fuels.
+ */
+function rewild(w: World): void {
+  if (w.packs.length === 0) {
+    const td = townDist(w);
+    let best = -1,
+      bd = 0;
+    for (let i = 0; i < w.N; i += 7) {
+      if (w.L.water[i] >= 2 || td[i] < 20) continue;
+      if (td[i] > bd) {
+        bd = td[i];
+        best = i;
+      }
+    }
+    if (best >= 0) applyCommand(w, { t: 'reintroduceWolves', cell: best });
+  }
+  let need = 4 - w.colonies.filter((c) => c.active).length;
+  if (need <= 0) return;
+  const sites: Array<[number, number]> = [];
+  for (let i = 0; i < w.N; i++) {
+    const s = beaverSiteScore(w, i);
+    if (s >= 0.11 && !w.colonies.some((c) => c.active && Math.hypot((c.cell % w.W) - (i % w.W), ((c.cell / w.W) | 0) - ((i / w.W) | 0)) < 12)) sites.push([s, i]);
+  }
+  sites.sort((a, b) => b[0] - a[0]);
+  const used: number[] = [];
+  for (const [, i] of sites) {
+    if (need <= 0) break;
+    if (used.some((u) => Math.hypot((u % w.W) - (i % w.W), ((u / w.W) | 0) - ((i / w.W) | 0)) < 12)) continue;
+    if (applyCommand(w, { t: 'relocateBeavers', cell: i }).ok) {
+      used.push(i);
+      need--;
+    }
+  }
+}
+
 function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
   const w = generateWorld(makeConfig(scen, seed));
   if (years > 0) w.config.tenureYears = years;
@@ -150,7 +188,10 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
     applyCommand(w, { t: 'policy', key: 'airPatrol', value: true });
     buildLookouts(w, 2);
   } else if (strat === 'steward') stewardSetup(w);
-  else if (strat === 'neglect') {
+  else if (strat === 'rewilder') {
+    applyCommand(w, { t: 'policy', key: 'wolfPolicy', value: 'protected' });
+    rewild(w);
+  } else if (strat === 'neglect') {
     const hand = w.crews.filter((c) => c.kind === 'hand');
     const eng = w.crews.filter((c) => c.kind === 'engine');
     if (hand.length > 2) applyCommand(w, { t: 'dismiss', crewId: hand[hand.length - 1].id });
@@ -174,6 +215,7 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
     for (const p of ww.review.petitions) {
       let accept = false;
       if (strat === 'steward') accept = p.faction === 'residents' || p.faction === 'conservation' || (p.action.type === 'policy' && p.faction === 'tourism');
+      else if (strat === 'rewilder') accept = p.faction === 'conservation';
       else if (strat === 'firefight') accept = p.faction === 'residents';
       applyCommand(ww, { t: 'petition', id: p.id, accept });
     }
@@ -187,6 +229,7 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
       if (w.doy === 20 || w.doy === 235) treatSpend += stewardTreat(w, 'burn', Math.max(0, (w.economy.funds - reserve) * 0.3));
       if (w.doy === 280 || w.doy === 60) treatSpend += stewardTreat(w, 'thin', Math.max(0, (w.economy.funds - reserve) * 0.55));
     }
+    if (strat === 'rewilder' && w.doy === 100) rewild(w);
     sim.runDays(5, onReview);
     if (w.review.pending) onReview(w);
   }
@@ -218,6 +261,9 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
     exposure0: Math.round(exposure0 * 100),
     exposure1: Math.round((ex?.now ?? 0) * 100),
     charges: obj.filter((o) => (o.kind === 'reach' ? o.progress >= 1 : o.state !== 'failed' && o.state !== 'behind')).length,
+    met: obj.map((o) => ((o.kind === 'reach' ? o.progress >= 1 : o.state !== 'failed' && o.state !== 'behind') ? '+' : '-') + o.id).join(' '),
+    wolfYearsPct: Math.round((100 * w.stats.wolves.filter((x: number) => x > 0).length) / Math.max(1, w.stats.wolves.length)),
+    colonies: w.colonies.filter((c) => c.active).length,
     trust: Math.round(w.memory.trustYears ? (w.memory.trustSum ?? 0) / w.memory.trustYears : w.trust),
     funds: Math.round(w.economy.funds / 1000),
     treatK: Math.round(treatSpend / 1000),

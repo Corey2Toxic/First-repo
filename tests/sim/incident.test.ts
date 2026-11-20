@@ -379,6 +379,35 @@ describe("the council's charge", () => {
     expect(String(row[2])).toContain('✗ Keep the homes');
     expect(String(row[2])).toContain('✓ Make the towns defensible');
   });
+
+  it('"put fire back to work" counts fire the warden chose, not fire that got away', () => {
+    // until the last round of bots every hectare that did not burn severely counted, and a passive
+    // warden met the charge in four of six First Season valleys with the fires its crews lost
+    const run = (response: 'suppress' | 'monitor') => {
+      const w = flatWorld(60, 40, PINE);
+      w.config.scenario = 'firstseason';
+      w.weather.windSpeed = 2;
+      w.rng.fire = new Rng('chosen');
+      const fe = startFire(w, 20 * w.W + 30, 'lightning')!;
+      fe.response = response;
+      for (let s = 0; s < 40 && w.burning.length; s++) fireSubstep(w);
+      const good = objectives(w).find((o) => o.id === 'goodfire')!;
+      return { burned: w.counters.totalBurned, severe: w.counters.totalHighSeverity, managed: w.counters.totalManagedGood, progress: good.progress };
+    };
+    const lost = run('suppress');
+    expect(lost.burned).toBeGreaterThan(20);
+    expect(lost.managed).toBe(0);
+    expect(lost.progress).toBe(0);
+    const chosen = run('monitor');
+    expect(chosen.managed).toBe(chosen.burned - chosen.severe);
+    expect(chosen.managed).toBeGreaterThan(20);
+    expect(chosen.progress).toBeGreaterThan(0);
+    // a prescribed burn counts through the hectares it is billed for
+    const w = flatWorld(60, 40, PINE);
+    w.config.scenario = 'firstseason';
+    w.counters.totalRx = 500;
+    expect(objectives(w).find((o) => o.id === 'goodfire')!.reading).toContain('500 ha');
+  });
 });
 
 describe('wilderness policy', () => {

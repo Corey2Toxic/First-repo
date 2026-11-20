@@ -142,9 +142,9 @@ map when time is paused or at Watch speed.
 | | | The council's charge |
 |---|---|---|
 | **First Season** | Healthy, patchy forest; wolves and beavers present; tutorial; 20 years. | Lose no more than 8 homes · cut by a third the homes a bad day would take · put fire back to work |
-| **The Tinderbox** | A century of fire suppression, rising temperatures; 25 years. | Lose no more than 15 homes · halve the homes a bad day would take · keep severe fire under 30 % |
+| **The Tinderbox** | A century of fire suppression, rising temperatures; 25 years. | Lose no more than 15 homes · halve the homes a bad day would take · keep severe fire under 20 % |
 | **After the Burn** | A vast fresh burn scar above the reservoir; debris-flow risk; 20 years. | Keep the reservoir under 25 % silted · lose no more than 8 homes · let the aspen come back |
-| **Boomtown** | Four towns growing into the forest; a hungry mill; 25 years. | Lose no more than 20 homes · grow without growing the danger · let the valley grow by a quarter |
+| **Boomtown** | Four towns growing into the forest; a hungry mill; 25 years. | Lose no more than 20 homes · cut by a quarter the homes a bad day would take · let the valley grow by a quarter |
 | **Silent Woods** | No wolves for 80 years, too many deer, dying aspen, no beavers; 25 years. | Wolves for half your tenure · four beaver colonies · let the aspen come back |
 | **Custom Valley** | Seed, size, warming, precipitation, fire history, wildlife, towns, funds, tenure. | Homes · exposure · trust |
 

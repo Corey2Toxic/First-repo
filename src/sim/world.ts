@@ -407,6 +407,8 @@ export class World {
     totalBurned: 0,
     totalHighSeverity: 0,
     totalRx: 0,
+    /** v2: wildfire hectares that burned at low or moderate severity under a Confine or Monitor response */
+    totalManagedGood: 0,
     megafires: 0,
     lastMegafireYear: -999,
     debrisFlows: 0,

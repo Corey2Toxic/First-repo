@@ -87,15 +87,20 @@ function defensible(w: World, factor: number, title = 'Make the towns defensible
   return reach('exposure', title, charge, done, reading, served(w));
 }
 
-/** Low- and moderate-severity fire, prescribed or wild, as a share of the valley per year. */
+/**
+ * Fire the warden chose, as a share of the valley per year: prescribed burns, and wildfire that
+ * burned at low or moderate severity while its response was Confine or Monitor. (Until the last
+ * round of bots this counted every hectare that did not burn severely, so a passive warden met the
+ * charge with the fires that got away from the crews: four of six First Season valleys.)
+ */
 function goodFire(w: World, sharePerYear: number): Objective {
   const land = landCells(w);
-  const good = Math.max(0, w.counters.totalBurned - w.counters.totalHighSeverity);
+  const good = Math.max(0, w.counters.totalRx + (w.counters.totalManagedGood ?? 0));
   const target = sharePerYear * land * w.config.tenureYears;
   return reach(
     'goodfire',
     'Put fire back to work',
-    `Let ${Math.round(target).toLocaleString('en-US')} ha burn at low or moderate severity during your tenure, by prescribed burns or by fires you choose to manage.`,
+    `Put ${Math.round(target).toLocaleString('en-US')} ha under fire of your choosing during your tenure: prescribed burns, and wildfires you confine or monitor that stay on the ground.`,
     target > 0 ? good / target : 1,
     `${Math.round(good).toLocaleString('en-US')} ha so far`,
     served(w),
@@ -175,11 +180,15 @@ export function objectives(w: World): Objective[] {
     case 'firstseason':
       return [keepHomes(w, 8), defensible(w, 2 / 3), goodFire(w, 0.006)];
     case 'tinderbox':
-      return [keepHomes(w, 15), defensible(w, 0.5), severity(w, 0.3)];
+      // (the ceiling was 30 % while a Tinderbox thicket torched in any wind; with the crown base at
+      // 1.5 m a passive warden's fires average 20 % and a steward's 10 %)
+      return [keepHomes(w, 15), defensible(w, 0.5), severity(w, 0.2)];
     case 'afterburn':
       return [reservoir(w, 0.25), keepHomes(w, 8), aspen(w, 0.3)];
     case 'boomtown':
-      return [keepHomes(w, 20), defensible(w, 1, 'Grow without growing the danger'), growth(w, 1.25)];
+      // (the second charge was "do not let the danger grow"; the fires a passive warden fails to
+      // catch thin the fuel and met it on all four verification valleys)
+      return [keepHomes(w, 20), defensible(w, 0.75, 'Grow safer, not only bigger'), growth(w, 1.25)];
     case 'silentwoods':
       return [wolvesBack(w, 0.5), beaversBack(w, 4), aspen(w, 0.3)];
     default:

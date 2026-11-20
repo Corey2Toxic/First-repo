@@ -27,7 +27,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description:
       'A healthy, patchy forest shaped by generations of natural fire. Wolves and beavers are present, the council is patient, and an advisor walks you through your first fire season. Twenty years to make your mark.',
     difficulty: 1,
-    charge: ['Lose no more than 8 homes', 'Cut by a third the homes a bad fire day would take', 'Put fire back to work: low and moderate fire on 0.6 % of the valley a year'],
+    charge: ['Lose no more than 8 homes', 'Cut by a third the homes a bad fire day would take', 'Put fire back to work: fire of your choosing on 0.6 % of the valley a year'],
     config: {
       tenureYears: 20,
       difficulty: 'gentle',
@@ -49,7 +49,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description:
       'For a hundred years every fire was suppressed. Fir has crowded into the pine, litter lies ankle-deep, and the summers are getting hotter. Can you bring fire back on your own terms before it returns on its own?',
     difficulty: 3,
-    charge: ['Lose no more than 15 homes', 'Halve the homes a bad fire day would take', 'Keep severe fire under 30 % of what burns'],
+    charge: ['Lose no more than 15 homes', 'Halve the homes a bad fire day would take', 'Keep severe fire under 20 % of what burns'],
     config: {
       tenureYears: 25,
       difficulty: 'standard',
@@ -93,7 +93,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description:
       'The valley is booming. New houses push into the forest every year, the mill is hungry, and visitors pour in each summer. Growth pays the bills — and puts more lives in the path of the next fire.',
     difficulty: 3,
-    charge: ['Lose no more than 20 homes', 'Grow without growing the danger to the towns', 'Let the valley grow by a quarter'],
+    charge: ['Lose no more than 20 homes', 'Cut by a quarter the homes a bad fire day would take', 'Let the valley grow by a quarter'],
     config: {
       tenureYears: 25,
       difficulty: 'standard',
