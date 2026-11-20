@@ -34,10 +34,10 @@ Headline results (details and commands in section 6):
 
 | | 1.1.1 | 2.0 |
 |---|---|---|
-| A slow fire arrives (pine litter, 3 m/s: realised ÷ specified rate) | 0.27 | 1.21 |
+| A slow fire arrives (pine litter in a 1 m/s wind, realised ÷ specified rate; fir litter and night fire were 0) | 0.05 | 1.46 |
 | Fires of 1,000 ha or more, Tinderbox, passive, 20 years (4 seeds) | BASE_TB_BIG | REG_TB_BIG |
 | Longest fire, same runs | BASE_TB_LONG days | REG_TB_LONG days |
-| Homes lost when a fire reaches a town in untreated thicket / thinned and burned ground (of 12) | 11.9 / 11.0 (2.0 before the fix) | 11.1 / 3.2 |
+| Homes lost of 12 when a bad-day fire reaches a town: untreated thicket / thinned and burned / treated and firewise | no such measure (an early 2.0 build: 11.9 / 11.0) | 8.1 / 1.9 / 0.7 |
 | Stewardship against a passive warden, Tinderbox, same valleys (score) | +14 (88 vs 74, 1.1's own bots and score) | BOT_TB_STEWARD_DELTA |
 | Neglect against a passive warden, Tinderbox (homes lost) | not measured | BOT_TB_NEGLECT_HOMES |
 | Homes a bad fire day would take, Tinderbox, after 25 years of stewardship | no such measure | BOT_TB_EXPOSURE |
@@ -86,11 +86,11 @@ What was wrong:
 | # | Finding | Evidence |
 |---|---|---|
 | 1 | Fires last a day: 45 of 49 Tinderbox wildfires out within one day in 12 years, none over 1,000 ha, no homes lost; with crews switched off, the largest fire was 796 ha. | `regime.ts` |
-| 2 | Root cause: spread progress discarded every 3-hour step. Realised ÷ specified head rate 0.79 / 0.27 / 0.05 in pine litter at 6 / 3 / 1 m/s; 0 in fir litter and for any litter fire at night. | `slowspread.ts` |
+| 2 | Root cause: spread progress discarded every 3-hour step. Realised ÷ specified head rate 0.70 / 0.46 / 0.05 in pine litter at 6 / 3 / 1 m/s (0.27 in damp litter at 3 m/s); 0 in fir litter and for any litter fire at night. | `slowspread.ts` |
 | 3 | Intensity is a load-and-dryness proxy that does not know rate or direction. | code; `firetrace.ts` |
 | 4 | Putting a cell out does not stop it spreading. | code |
 | 5 | Treatments mostly do not work: thinning raised the hazard index (slash), burns covered a median 41 % of their unit and were billed for all of it, one unworkable project froze the queue for the rest of a tenure. | crews study; `crews2.test.ts` states each |
-| 6 | Nothing in a generated Tinderbox valley can torch at any wind. | `fuels.ts` |
+| 6 | A generated Tinderbox valley has almost no ladder fuel (continuity 0.11–0.30): under a physical crowning rule nothing in it torches at any wind, and 4–7 % of what burned in 1.1.1 burned at high severity. The valley that is meant to be the fire paradox is not one. | a fuel census made with the prototype fire core on 1.1.1's valleys (not in the repository); the high-severity row of 6.3 is the part that can be re-run |
 | 7 | No forecast, no projection, no measure of a town's exposure, no account of why a fire stopped. | — |
 | 8 | Money does not bind: a passive warden returns about $0.8M of a $1.5M income to the county every year. | ledger over 6 years |
 | 9 | Deer have no density dependence below ~60 per km² (forage eaten mostly stays on the range); small wolf packs kill 25–45 deer a wolf a year against 20 intended; hunting revenue grows with an irruption. | wildlife study; `wildlife.ts` |
@@ -133,25 +133,32 @@ of a fire is the price; see 8), the council system, the renderer, the scoring st
 - Spread progress carried between steps (layer `fprog`).
 - Byram fireline intensity; flame length in metres in `fint`/`fpeak`; direct-attack limits of 1.2,
   2.4 and 3.4 m; severity from peak flame.
-- Van Wagner crown initiation from canopy base height and foliar moisture, and his criterion for
-  active crown runs.
+- Van Wagner crown initiation from canopy base height (1.5 m in a thicket, 9.5 m in open old pine)
+  and foliar moisture, and his criterion for active crown runs.
 - An understory layer (`under`) that fills in where fire stays away, is the main ladder fuel, speeds
   the litter fire beneath it, and is cleared by light fire and by thinning.
 - Advancing and holding fronts; per-fuel moisture response; night humidity recovery; a wind that
   swings through the day; a geometric mean for mixed fuel beds.
 - A new fire builds for two steps before it runs at full rate.
 - House ignition steeply convex in flame length; a grass front counts for less than timber.
+- Ground burned within the year does not carry fire for three months and recovers over the rest of
+  the year: a burn scar, and a prescribed burn, is a barrier for a season.
 
 ### 5.2 Crews, treatments, tools
 
 `crews.ts`, `projects.ts`, `commands.ts`.
 
-- Crews are assigned by the edge a fire still has open, are moved between fires when a more
+- Crews are assigned by the edge a fire still has open. When there are more fires than crews every
+  fire gets a working minimum before any gets more; crews are moved between fires when a more
   dangerous one is short, work a night shift until spent, and tire only on fire duty.
 - Outside incident teams (four hand crews, two engines, a helicopter): called by the warden or by a
-  standing order, arrive next morning, paid by the day; a second team for a fire past 2,000 ha; sent
-  home when the county will extend no more credit.
+  standing order, arrive next morning, paid by the day; a second team for a fire past 2,000 ha, at
+  most three in the valley.
 - A major incident is a declared emergency: the state pays three quarters of crew overtime.
+- Emergency fire spending (overtime, outside teams) can take the service $200k into debt and no
+  further; past that the state carries the fires, the teams stay, and the warden is told. A fire
+  season cannot by itself put the service into receivership. The debt still has to be answered for
+  at the review.
 - Projects cannot deadlock; several crews share a large one; burn units split at 300 ha; a burn is
   lit only with its holding force and only on a day the fire model says it will carry and stay on
   the ground; it is billed for what burned. Thinning disposes of its slash and opens the canopy.
@@ -219,19 +226,35 @@ TEST_SUMMARY
 
 | | 1.1.1 | 2.0 |
 |---|---|---|
-| Pine litter, 6 m/s | 0.79 | 1.11 |
-| Pine litter, 3 m/s | 0.27 | 1.21 |
+| Pine litter, 6 m/s | 0.70 | 1.11 |
+| Pine litter, 3 m/s | 0.46 | 1.21 |
+| Pine litter, 3 m/s, damp (12 % moisture) | 0.27 | 1.29 |
 | Pine litter, 1 m/s | 0.05 | 1.46 |
 | Fir litter, 6 m/s | 0 | 1.11 |
-| Pine litter, night | 0 | 1.29 |
+| Fir litter, 3 m/s | 0 | 1.20 |
+| Pine litter, night, 6 m/s | 0 | 1.29 |
 
-(Values above 1 are first-passage over competing paths, largest in near-calm air.)
+(Values above 1 are first-passage over competing paths, largest in near-calm air. The harness
+measures an established fire; a new fire's first two steps are deliberately slower, see 5.1.)
 
-Fuel census of a generated Tinderbox valley, share of wooded land that torches on a dry afternoon at
-a 6 m/s wind: 1.1.1 0 %; 2.0 75 % (`fuels.ts tinderbox cal-a 0`). First Season: 16 %.
+Fuel census of a generated valley, share of wooded land that torches on a dry afternoon
+(`fuels.ts <scenario> cal-a 0`): Tinderbox 51 % in a 6 m/s wind and 75 % at 12 m/s; First Season
+0 % and 18 %.
 
-Homes (`project.ts homes`): table in `FIRE_MODEL.md` 2.7. Untreated thicket 11.1 of 12 lost;
-firewise 6.5; thinned and burned 3.2; both 1.0.
+Homes lost of 12 when a design-day fire reaches a town, mean of 12 runs, with the fireshed's
+estimate beside it (`project.ts homes`):
+
+| Ground around the town | Simulation | Fireshed's estimate |
+|---|---|---|
+| Untreated thicket | 8.1 | 7.5 |
+| Untreated thicket, firewise | 3.3 | 3.2 |
+| Thinned and underburned within 400 m | 1.9 | 2.4 |
+| Treated and firewise | 0.7 | 0.8 |
+| Open pine litter | 1.8 | 2.4 |
+| Cured grass | 3.7 | 4.9 |
+
+The estimate's three constants were fitted to these six cases, so the agreement is a fit, not a
+test.
 
 ### 6.3 Fire regime, passive warden
 
@@ -344,11 +367,15 @@ In rough order of how much it matters.
 | A uniform 1.1 correction to the projection | Fixed the head, left the area 35 % short. A lead that rises from 1.1 at the head to 1.4 on the flanks. |
 | Building up a new fire by its size alone | A litter fire stayed "new" for days and crawled. By age (two steps) unless already 6 ha. |
 | Outside teams at $60k to mobilise and $55k a day | Bankrupt in year 1 of a passive Tinderbox. The valley's share: $25k and $20k. |
-| Outside teams with no credit limit | One passive run in four bankrupt in year 13. Sent home at the emergency credit limit; the standing order needs a week's bills in hand. |
+| Outside teams with no credit limit | One passive run in four bankrupt in year 13. |
+| Outside teams sent home at a $400k credit limit; a standing order that needed a week's bills in hand | The team left with the fire still running and the town in front of it, and a steward was still bankrupt in year 1 on one summer's overtime. Emergency spending now stops at $200k of debt, the state carries the rest and the team stays. |
 | Crew overtime at full cost on every fire | A steward who had spent the reserve on thinning went bankrupt in one summer ($1.2M of overtime). The state pays three quarters on a major incident. |
 | Wilderness that monitors every fire | Harmless when fires died in a day. Monitors only lightning fires that start on a mild day. |
 | A suppression roster of two more crews and a helicopter (bot) | Bankrupt in year 8. Not a fix, a finding: money binds now. |
-| One outside team per fire, two in the valley | Could not hold a fire of thousands of hectares; see 8.3. A second team past 2,000 ha. |
+| One outside team per fire, two in the valley | Could not hold a fire of thousands of hectares. A second team past 2,000 ha, three in the valley. Kept, but it did not change the years in which half a valley burned; the cause was the next row. |
+| A canopy base as low as 0.5 m in a thicket | 81–88 % of a Tinderbox valley's woods torched in a 3 m/s wind, so no edge of an escaped fire could be worked in any weather: on eight verification seeds five passive tenures had a year with over 40 % of the valley burned. Floor of 1.5 m, inside the published 1–3 m for untreated mixed conifer. |
+| Burned ground that carries fire again as soon as its grass cures | One neglected valley recorded 119 % of its land burned in a year: the same ground twice. A scar now carries nothing for three months and recovers over the year. |
+| Dispatch that filled the first fire's want before looking at the second | With two fires and five crews one fire had five and the other none. Two passes: a working minimum for each, then the rest. |
 | First Season: lose no more than 5 homes | One fire can take more with everything done right. Eight. |
 | A fan-out of thirteen study agents | Eleven lost to a usage limit on a machine that ran two at a time. |
 | A design target of 80–85 % of fires caught by a passive warden | It is a result of roster, lookouts and roads, not a constant; accepted at 60–73 % with the reason in 8.2. |

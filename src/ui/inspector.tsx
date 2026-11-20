@@ -460,6 +460,11 @@ function WildView({ s }: { s: GameSession }) {
         <p class="faint" style={{ fontSize: '12px' }}>
           The dashed circle is the pack’s territory. Deer avoid it, so browse there falls and young aspen and willow can grow.
         </p>
+        <p class="faint" style={{ fontSize: '12px' }}>
+          {p.lone !== undefined
+            ? 'A lone wolf holding its territory. It may find a mate from the country beyond the valley within a year or two, or be gone.'
+            : 'The valley is room for two or three territories of a much larger range. Packs here fade in hard winters with few deer, and wolves from beyond the valley walk in again.'}
+        </p>
       </div>
     );
   }

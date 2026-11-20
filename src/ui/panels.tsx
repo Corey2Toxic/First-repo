@@ -550,7 +550,7 @@ function HelpPanel() {
         <h3>A first plan</h3>
         <ol class="dim" style={{ paddingLeft: '18px', margin: 0 }}>
           <li>Open the Fireshed lens. The red and orange ground upwind of each town is where to work.</li>
-          <li>Thin the first few hundred metres around homes; burn beyond them. A burn is lit only on a day the burn boss calls a go (select the unit to see why not).</li>
+          <li>Thin the first few hundred metres around homes; burn beyond them. A burn is lit only on a day the burn boss calls a go (select the unit to see why not). Ground that has burned carries no fire for the rest of that season.</li>
           <li>Build a lookout or two and hire crews: fires caught in their first hours stay small.</li>
           <li>Set remote high country to Wilderness, where lightning fires in mild weather can be left to do the burning for you.</li>
           <li>Read the forecast before the season, and the council’s charge before the review.</li>

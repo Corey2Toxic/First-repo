@@ -29,7 +29,9 @@ html = html.replace(/<script type="module"[^>]*src="\.?\/?assets\/([^"]+)"[^>]*>
 html = html.replace(/<link rel="modulepreload"[^>]*>/g, '');
 
 const body = /<body>([\s\S]*)<\/body>/.exec(source)?.[1].replace(/<script[\s\S]*?<\/script>/g, '').trim() ?? '';
-const title = /<title>([^<]*)<\/title>/.exec(source)?.[1] ?? 'Fireweed';
+// the hosted page carries its version in the title, so that it sits beside earlier releases
+const version = (JSON.parse(readFileSync('package.json', 'utf8')) as { version: string }).version.split('.').slice(0, 2).join('.');
+const title = `${/<title>([^<]*)<\/title>/.exec(source)?.[1] ?? 'Fireweed'} ${version}`;
 const hosted = [
   `<title>${title}</title>`,
   `<style>\n${css.join('\n')}\n</style>`,

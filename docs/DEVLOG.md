@@ -162,10 +162,28 @@ Order of work, with what each step taught:
    lenses, reports, the charge, night.
 10. **Bots.** Four strategies on verification seeds. They found a standing order that bankrupted a
     passive warden, a steward bankrupted by one summer's overtime, and Wilderness fires left to burn
-    in August. Fixed: aid stops at the credit limit; the state pays three quarters of a major
-    incident's overtime; Wilderness monitors only what starts on a mild day.
+    in August. Fixed: aid stopped at a credit limit (changed again in step 12); the state pays
+    three quarters of a major incident's overtime; Wilderness monitors only what starts on a mild
+    day.
 11. **Wildlife.** Four measured defects fixed (forage accounting, kill ledger, lone wolf, hunting
     revenue); the snowy-valley wolf question is recorded as open.
+12. **The last round of bots found the tail of the regime.** On eight verification valleys five
+    passive Tinderbox tenures had a year in which over 40 % of the valley burned, and a steward was
+    bankrupt in year 1. A second outside team for very large fires did not change it. A day-by-day
+    trace of one such fire and a torching census found the cause in one constant: canopy base
+    height fell to 0.5 m in a thicket, where the torching threshold is a 50 cm flame, so 81–88 % of
+    a Tinderbox valley's woods torched in a 3 m/s wind and no edge of an escaped fire could be
+    worked in any weather. The floor is 1.5 m. With it went three smaller fixes: emergency fire
+    spending stops at $200k of debt and the state carries the rest (sending the outside team home
+    at the limit had lost the towns); a burn scar carries no fire for a season (one valley had
+    recorded 119 % of its land burned in a year); dispatch gives every fire a working minimum
+    before any gets more.
+13. **Checking the report against its own commands found two wrong figures.** The slow-spread
+    harness holds the clock still, so 2.0's build-up of a new fire applied to every step and the
+    harness reported ratios of 0.5–0.7 for a model that makes 1.1–1.5; it now measures an
+    established fire. And the 1.1.1 figures quoted since the evaluation (0.79 and 0.27 for pine
+    litter at 6 and 3 m/s) had come from a prototype harness; the committed one gives 0.70 and
+    0.46 (0.27 is damp litter). Lesson: re-run every command in a report before signing it.
 
 Things worth knowing when changing this code:
 

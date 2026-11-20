@@ -5,9 +5,9 @@
  *   node scripts/v2/slowspread.ts            # this tree
  *   FW_ROOT=<1.1.1 checkout> node scripts/v2/slowspread.ts
  *
- * On 1.1.1 any fire specified below ~30 m/h barely moves (pine litter at 3 m/s: 27 % of its rate;
- * at 1 m/s: 5 %; fir litter and all night-time litter fire: 0), because the crossing time is redrawn
- * every 3-hour step and the progress made is thrown away.
+ * On 1.1.1 any fire specified below ~30 m/h barely moves (pine litter at 3 m/s: 46 % of its rate,
+ * 27 % when damp; at 1 m/s: 5 %; fir litter and all night-time litter fire: 0), because the crossing
+ * time is redrawn every 3-hour step and the progress made is thrown away.
  */
 import { loadSim, flatValley, ROOT } from './lib.ts';
 import type { Bed } from './lib.ts';
@@ -35,7 +35,10 @@ function run(label: string, bed: Bed, wind: number, fm: number, sub = 4, hours =
     const w = flatValley(S, bed, { w: 160, h: 61, fm, wind, sub });
     w.rng.fire = w.rng.fire.fork('rep' + rep);
     const c = 30 * w.W + 20;
-    S.fire.startFire(w, c, 'lightning');
+    const fe = S.fire.startFire(w, c, 'lightning');
+    // an established fire: the clock does not move here, so 2.0's build-up of a new fire (its first
+    // two steps) would otherwise apply to every step and be mistaken for a step-boundary loss
+    if (fe) fe.startSub = undefined;
     for (let s = 0; s < hours / 3; s++) {
       w.sub = sub;
       // keep every burning cell alight and flaming, so burn-out does not confound the measurement

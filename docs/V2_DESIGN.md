@@ -19,7 +19,7 @@ Measured on the inherited code (fresh seeds, default management; harnesses in `s
 |---|---|
 | Fires are over before the player can act | The Tinderbox, 12 years: 45 of 49 wildfires were out within one day; the longest lasted 4 days. At the "watch" speed a one-day fire lasts under three seconds of real time. |
 | Nothing threatens a passive player for a decade | Same run: largest fire 615 ha (1.5 % of the valley), no fire reached 1,000 ha, no home was lost in 12 years. With crews switched off entirely the largest fire was 796 ha. |
-| Slow fire cannot exist | Each 3-hour step redraws the time a front needs to reach the next cell and discards the progress it had made. Realised ÷ specified head rate: pine litter in a 6 m/s wind 0.79, in 3 m/s 0.27, in 1 m/s 0.05; fir litter 0; any litter fire at night 0. Flanks, backing fire and night creep do not occur; "monitoring" a fire does nothing because the fire does nothing; prescribed burns do not carry. |
+| Slow fire cannot exist | Each 3-hour step redraws the time a front needs to reach the next cell and discards the progress it had made. Realised ÷ specified head rate: pine litter in a 6 m/s wind 0.70, in 3 m/s 0.46 (0.27 when damp), in 1 m/s 0.05; fir litter 0; any litter fire at night 0. Flanks, backing fire and night creep do not occur; "monitoring" a fire does nothing because the fire does nothing; prescribed burns do not carry. |
 | Intensity does not know how fast the fire is moving | `fint` is a load-and-dryness proxy: a grass head fire running 1.4 km/h reads as the mildest fire on the map, and the head, flank and rear of one fire read the same. |
 | Direct attack does not attack | "Extinguishing" a cell shortens its burn time but the cell still spreads at full vigour in its last step; only fireline on unburned ground stops anything. |
 | The year is mostly dead air | Fire is on the map for 4–8 days a year. Between fires nothing asks for a decision, and at the review the council returns most of the unspent budget. |
@@ -208,3 +208,7 @@ Built differently:
 Not built: the response-time map; a display of crew-days available against crew-days queued;
 control lines to burn out from (crews still only cut line and mop up); a recommended response on
 the fire report. The reasons and the rest of what is missing are in `V2_REPORT.md`, section 8.
+
+Corrected at release: the slow-spread figures in section 1 are those the committed harness gives
+(`scripts/v2/slowspread.ts`). The draft quoted 0.79 and 0.27 for pine litter at 6 and 3 m/s from a
+prototype harness with a damper fuel bed; 0.27 is the damp-litter figure.

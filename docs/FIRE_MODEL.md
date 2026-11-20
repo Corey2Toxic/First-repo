@@ -17,7 +17,7 @@ Measured on the 1.1.1 tree with the harnesses in `scripts/v2/`:
 | Finding | Evidence |
 |---|---|
 | Fires lasted a day. 45 of 49 Tinderbox wildfires were out within one day in 12 years; none reached 1,000 ha; no homes were lost. With no crews at all the largest fire was 796 ha. | `regime.ts tinderbox <seed> 12 [nodispatch]` |
-| **Root defect: spread progress was thrown away at every 3-hour step.** A front that needed more than three hours to cross a cell never arrived. Realised / specified head rate: pine litter 0.79 at 6 m/s, 0.27 at 3 m/s, 0.05 at 1 m/s; fir litter 0; all litter at night 0. | `slowspread.ts` |
+| **Root defect: spread progress was thrown away at every 3-hour step.** A front that needed more than three hours to cross a cell never arrived. Realised / specified head rate: pine litter 0.70 at 6 m/s, 0.46 at 3 m/s (0.27 when damp), 0.05 at 1 m/s; fir litter 0; all litter at night 0. | `slowspread.ts` |
 | Intensity was a proxy of fuel load and dryness, blind to rate of spread and direction: flanks "burned" as hot as the head, a fast grass fire was workable on every edge, and crown fire was decided by load. | `fire.ts` (v1.1), `firetrace.ts` |
 | Putting a cell out did not stop it spreading during that step. | `crews.ts` `extinguish` (v1.1) |
 | Nothing in a generated "Tinderbox" valley could torch, even at 12 m/s: a stand was one mean age per species, so a century of ingrowth under old trees read as an old stand. | `fuels.ts tinderbox <seed> 0` |
@@ -146,10 +146,10 @@ Twelve-home town, a fire front 1.2 km upwind, westerly design day, mean of 12 ru
 
 | Ground around the town | Homes lost (simulation) | Fireshed's estimate |
 |---|---|---|
-| Untreated thicket | 8.3 | 7.5 |
-| Untreated thicket, firewise 0.9 | 3.7 | 3.2 |
-| Thinned and underburned within 400 m | 2.4 | 2.4 |
-| Treated and firewise | 1.2 | 0.8 |
+| Untreated thicket | 8.1 | 7.5 |
+| Untreated thicket, firewise 0.9 | 3.3 | 3.2 |
+| Thinned and underburned within 400 m | 1.9 | 2.4 |
+| Treated and firewise | 0.7 | 0.8 |
 | Open pine litter | 1.8 | 2.4 |
 | Cured grass | 3.7 | 4.9 |
 
@@ -163,6 +163,10 @@ steps; those constants are fitted to these six cases and to nothing else.)
 * Roads and fuel breaks hold a surface front unless wind or flame length carries it across
   (chance per attempt from 0.02 % for a calm, cool edge to tens of percent for a wind-driven head).
 * Fireline holds flames up to about 2 m and fails by 4.5 m; it weathers away in a few weeks.
+* A burn scar is a barrier for a season: ground that burned within the last three months carries no
+  fire, and its rate comes back from nothing to full over the rest of the year. (Without this a
+  fire that ran in spring re-burned its own scar in autumn; one valley recorded 119 % of its land
+  burned in a year.) After that, what a fire finds there is whatever has grown back.
 * Embers come from flames over 2.5 m, crown fire and burning houses, travel with the wind and need
   dry fine fuel where they land.
 * The air tanker flies in daylight, below 13 m/s of wind, six loads a day.
