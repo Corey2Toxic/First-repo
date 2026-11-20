@@ -36,6 +36,7 @@ uniform float uZoneMix;
 uniform float uContours;
 uniform float uGridLines;
 uniform float uElevRange;  // metres between elevN 0 and 1
+uniform float uNight;      // 0 day .. 1 deep night (only at watching speeds)
 
 out vec4 outColor;
 
@@ -348,6 +349,14 @@ void main() {
     result = mix(result, result * 0.75, clamp(g, 0.0, 1.0) * uGridLines * 0.6);
   }
 
+  // ---------------- night ----------------
+  // the valley goes blue and dim after dark; fire then shows as what it is at night: a glow
+  if (uNight > 0.0) {
+    float lum = dot(result, vec3(0.299, 0.587, 0.114));
+    vec3 moon = mix(vec3(lum), result, 0.55) * vec3(0.46, 0.58, 0.86);
+    result = mix(result, moon * 0.74, uNight * 0.9 * (1.0 - 0.75 * ov.a * uOverlayMix));
+  }
+
   // ---------------- fire & smoke ----------------
   float fi = F.r;
   float glow = textureLod(tFire, uv, 2.0).r;
@@ -360,7 +369,7 @@ void main() {
     float core = smoothstep(0.06, 0.3, fi);
     result = mix(result, result * 0.35, core * 0.6);
     result += fc * core * (0.55 + 0.6 * flick2);
-    result += vec3(1.0, 0.45, 0.12) * glow * 0.55;
+    result += vec3(1.0, 0.45, 0.12) * glow * (0.55 + 0.6 * uNight);
   }
   float sm = texture(tFire, uv).g * 0.6 + textureLod(tFire, uv, 1.5).g * 0.6;
   if (sm > 0.005) {
@@ -368,7 +377,8 @@ void main() {
     float puff = fbm(world * 0.45 - drift) * 0.7 + fbm(world * 1.3 - drift * 1.7) * 0.5;
     float a = clamp(sm * (0.55 + 0.9 * puff), 0.0, 0.88);
     vec3 smC = mix(vec3(0.42, 0.40, 0.39), vec3(0.80, 0.78, 0.74), puff);
-    smC += vec3(0.35, 0.14, 0.02) * glow * 0.8;
+    smC = mix(smC, smC * vec3(0.34, 0.38, 0.5), uNight * 0.8);
+    smC += vec3(0.35, 0.14, 0.02) * glow * (0.8 + 0.8 * uNight);
     result = mix(result, smC, a);
   }
 

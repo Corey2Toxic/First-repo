@@ -246,6 +246,8 @@ export interface Pack {
   targetHerd: number;
   kills: number;
   founded: number; // day
+  /** v2: day this pack was reduced to a single wolf (it holds its territory for a while) */
+  lone?: number;
 }
 
 export interface Colony {

@@ -1266,3 +1266,34 @@ canvas.chart {
 .speeds button {
   width: 28px;
 }
+
+/* laptops: the bar sheds words before it sheds information, then wraps */
+@media (max-width: 1540px) {
+  .topbar {
+    gap: 10px;
+  }
+  .topbar .wx .hum {
+    display: none;
+  }
+  .topbar .dword {
+    display: none;
+  }
+}
+@media (max-width: 1380px) {
+  .topbar .wx .temp,
+  .topbar .nword {
+    display: none;
+  }
+  .topbar .trustbar {
+    width: 48px;
+  }
+}
+@media (max-width: 1240px) {
+  .topbar {
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 12px;
+  }
+}

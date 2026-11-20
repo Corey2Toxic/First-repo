@@ -171,11 +171,12 @@ function updateHerd(w: World, h: Herd): void {
         if (!w.inside(x, y)) continue;
         const i = y * w.W + x;
         if (L.water[i] >= 2) continue;
-        // deer crop the accessible current growth, about half the standing grass that would cure into
-        // fuel and litter, so a unit of forage eaten removes less than a unit's worth of cover
-        L.grass[i] = Math.max(0, L.grass[i] * (1 - frac * grassAccess * 0.5));
-        // browsing takes the current year's twigs; what it does to shrub growth is the browse field
-        L.shrub[i] = Math.max(0, L.shrub[i] * (1 - frac * woodyAccess * 0.25));
+        // What is eaten leaves the range. (v1.x counted the accessible forage in full but took only
+        // half of the grass and a quarter of the browse eaten off the ground, and those again scaled
+        // by access: measured, 6-19 % of a winter's intake left the stock, so no herd ever ran its
+        // range down and deer had no carrying capacity below ~80 per km².)
+        L.grass[i] = Math.max(0, L.grass[i] * (1 - frac * grassAccess));
+        L.shrub[i] = Math.max(0, L.shrub[i] * (1 - frac * woodyAccess * 0.8));
         // the browse field is feeding pressure: it kills suckers and shoots and, when deer crowd a
         // range, holds back grass and shrub regrowth (range damage), so irruptions undercut themselves
         L.browse[i] = clamp01(L.browse[i] + frac * (0.9 * woodyAccess + 0.3 * grassAccess));
@@ -195,6 +196,8 @@ function updateHerd(w: World, h: Herd): void {
 function herdsMonthly(w: World): void {
   const r = w.rng.wildlife;
   const month = w.month;
+  // tags the valley sells at full price in a year: 0.6 per km²
+  const tagsAtFullPrice = Math.round((w.N / 100) * 0.6);
   for (const h of w.herds) {
     // fawns: a doe that came through winter in good condition raises one or two; a thin one may
     // raise none (late-winter condition, not the spring flush, sets the fawn crop)
@@ -216,8 +219,11 @@ function herdsMonthly(w: World): void {
       const taken = Math.min(h.n, stochasticRound(h.n * rate, r.next()));
       if (taken > 0) {
         h.n -= taken;
+        // the valley can host only so many hunters: past the tags it can sell at full price, the
+        // rest go cheap (v1.x paid $320 for every deer shot, so an irruption paid a million a year)
+        const full = Math.max(0, Math.min(taken, tagsAtFullPrice - w.counters.yearHunted));
         w.counters.yearHunted += taken;
-        w.earn('Hunting licenses', taken * REVENUE.huntLicense);
+        w.earn('Hunting licenses', full * REVENUE.huntLicense + (taken - full) * REVENUE.huntLicense * 0.2);
       }
     }
   }
@@ -364,7 +370,10 @@ function updatePack(w: World, p: Pack, hooks: WildlifeHooks): void {
       if (r.next() < pSuccess) {
         const k = p.n >= 8 && best.n > 3 ? 2 : 1;
         best.n = Math.max(0, best.n - k);
-        p.hunger = Math.max(0, p.hunger - k / Math.max(2, p.n)); // the kill is shared by the pack
+        // the kill is shared by the pack, and a carcass feeds it for days: what a small pack cannot
+        // eat today is not thrown away (v1.x zeroed the surplus, so packs of 2-4 killed 25-45 deer a
+        // wolf a year against the 20 the model intends, and ate themselves out of pups)
+        p.hunger = Math.max(-0.6, p.hunger - k / Math.max(1, p.n));
         p.kills += k;
         // territories drift toward where the hunting is good (but keep their distance from neighbours)
         // (territories are stable for years: a slow drift, and the centre stays well inside the valley)
@@ -473,8 +482,20 @@ function packsMonthly(w: World, hooks: WildlifeHooks): void {
     }
   }
   w.packs.push(...born);
-  for (const p of w.packs) if (p.n < 2 && hooks.onPackLost) hooks.onPackLost(p);
-  w.packs = w.packs.filter((p) => p.n >= 2);
+  // A pack reduced to one wolf holds its territory for a while: a disperser from beyond the valley
+  // may pair with it in autumn. (v1.x deleted the pack the moment it had fewer than two wolves.)
+  for (const p of w.packs) {
+    if (p.n === 1) {
+      if (p.lone === undefined) p.lone = w.day;
+      else if (w.month === 9 && w.policies.wolfPolicy !== 'bounty' && r.next() < 0.5) {
+        p.n = 2;
+        p.lone = undefined;
+      }
+    } else p.lone = undefined;
+  }
+  const gone = (p: Pack) => p.n < 1 || (p.n === 1 && p.lone !== undefined && w.day - p.lone > 540);
+  for (const p of w.packs) if (gone(p) && hooks.onPackLost) hooks.onPackLost(p);
+  w.packs = w.packs.filter((p) => !gone(p));
   // dispersing pairs from beyond the valley settle in vacant territory now and then (not under a bounty)
   if (w.month === 9 && w.policies.wolfPolicy !== 'bounty' && deerAll / (wolvesAll + 2) > 250) {
     for (let k = 0; k < 20; k++) {

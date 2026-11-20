@@ -53,7 +53,7 @@ export function TopBar({ s, openPanel }: { s: GameSession; openPanel: (p: PanelI
           </button>
         ))}
         <button class={'next' + (s.skipping ? ' on' : '')} id="next-event" onClick={() => s.advanceToEvent()} title="Run fast until something needs you: a fire, a fire-weather watch, a briefing, the turn of the season (N)" aria-label="Run to the next event">
-          Next ▸▸
+          <span class="nword">Next </span>▸▸
         </button>
       </div>
       <div class="stat" title={`Annual allocation ${money(w.economy.annualBudget)}`}>
@@ -80,11 +80,13 @@ export function TopBar({ s, openPanel }: { s: GameSession; openPanel: (p: PanelI
         </div>
       </div>
       <div class="danger-badge" style={{ background: DANGER_COLORS[wx.dangerClass] + '33', color: DANGER_COLORS[wx.dangerClass], border: `1px solid ${DANGER_COLORS[wx.dangerClass]}88` }} title="Valley fire danger today">
-        {DANGER_NAMES[wx.dangerClass]} danger{w.memory.fireBanActive ? ' · ban' : ''}
+        {DANGER_NAMES[wx.dangerClass]}
+        <span class="dword"> danger</span>
+        {w.memory.fireBanActive ? ' · ban' : ''}
       </div>
       <ForecastStrip s={s} />
       <div class="wx">
-        <span title="Temperature (valley floor)">{Math.round(wx.tmax)}°C</span>
+        <span class="temp" title="Temperature (valley floor)">{Math.round(wx.tmax)}°C</span>
         <span title={`Wind from the ${compass(wx.windDir)}`}>
           <span class="wind-arrow" style={{ transform: `rotate(${arrowDeg}deg)` }}>
             ➜

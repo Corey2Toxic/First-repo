@@ -71,6 +71,8 @@ export interface Settings {
   autoPause: boolean;
   /** draw where reported fires are expected to spread */
   projection: boolean;
+  /** darken the valley at night when time runs slowly */
+  night: boolean;
   labels: boolean;
   contours: boolean;
   wildlife: boolean;
@@ -111,7 +113,7 @@ export class GameSession {
   path: number[] = [];
   pathLabel = '';
   private roadStart = -1;
-  settings: Settings = { autoSlow: true, autoPause: true, projection: true, labels: true, contours: false, wildlife: true, audio: false, reveal: false, sharp: false };
+  settings: Settings = { autoSlow: true, autoPause: true, projection: true, night: true, labels: true, contours: false, wildlife: true, audio: false, reveal: false, sharp: false };
   /** Where fire is expected to spread: the selected fire, or every reported fire (refreshed as the clock moves). */
   projection: SpreadProjection | null = null;
   /** the fire the projection is for (-1: all reported fires) */
@@ -261,6 +263,25 @@ export class GameSession {
     this.clock.capBacklog(SPEEDS[4]);
     this.audio.resume();
     this.emit();
+  }
+
+  private nightShown = 0;
+  /**
+   * How dark to draw the valley: night falls only when time is paused or running slowly enough to
+   * watch (at speed the days would strobe), and it eases in and out.
+   */
+  private nightNow(dt: number): number {
+    const w = this.world;
+    let target = 0;
+    if (this.settings.night && this.speed <= 1 && !this.skipping) {
+      const hour = (w.sub + Math.min(1, this.clock.acc)) * 3;
+      const sun = Math.sin(((hour - 6) / 12) * Math.PI);
+      const t = Math.max(0, Math.min(1, (0.2 - sun) / 0.5));
+      target = t * t * (3 - 2 * t);
+    }
+    const k = Math.min(1, dt * 2.5);
+    this.nightShown += (target - this.nightShown) * k;
+    return this.nightShown < 0.004 ? 0 : this.nightShown;
   }
 
   /** The published forecast for the coming days (one computation per game day). */
@@ -414,6 +435,7 @@ export class GameSession {
         contours: this.settings.contours,
         gridLines: this.tool.id !== 'inspect' && this.tool.id !== 'send',
         revealFires: this.settings.reveal,
+        night: this.nightNow(dt),
       },
       this.mapCanvas.width,
       this.mapCanvas.height,

@@ -640,6 +640,7 @@ function MenuPanel({ s, onLoad, onQuit }: { s: GameSession; onLoad: (w: World) =
         {toggle('autoSlow', 'Slow time when a new fire is reported')}
         {toggle('autoPause', 'Pause when something needs a decision (an escaped fire, a town in a fire’s path)')}
         {toggle('projection', 'Shade where reported fires are expected to spread (P)')}
+        {toggle('night', 'Night falls when time is paused or at Watch speed')}
         {toggle('labels', 'Place-name labels')}
         {toggle('wildlife', 'Show wildlife on the map')}
         {toggle('contours', 'Contour lines')}

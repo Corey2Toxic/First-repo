@@ -31,6 +31,8 @@ export interface RenderOptions {
   gridLines: boolean;
   /** Show fires the player has not detected yet (debug / spectator). */
   revealFires: boolean;
+  /** 0 day .. 1 deep night (drawn only when time runs slowly enough to watch) */
+  night?: number;
 }
 
 export class MapRenderer {
@@ -338,6 +340,7 @@ export class MapRenderer {
     gl.uniform1f(this.u('uContours'), opts.contours ? 1 : 0);
     gl.uniform1f(this.u('uGridLines'), opts.gridLines ? 1 : 0);
     gl.uniform1f(this.u('uElevRange'), this.elevRange);
+    gl.uniform1f(this.u('uNight'), opts.night ?? 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 

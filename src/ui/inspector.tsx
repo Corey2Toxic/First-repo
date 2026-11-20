@@ -95,8 +95,8 @@ function Overview({ s }: { s: GameSession }) {
           {pct(w.reservoirLevel)} full{w.reservoirSilt > 0.02 ? ` · ${pct(w.reservoirSilt)} silted` : ''}
         </span>
         <span class="k">Deer · wolves</span>
-        <span class="v">
-          {deerCount(w)} · {wolfCount(w)} in {w.packs.length} pack{w.packs.length === 1 ? '' : 's'}
+        <span class="v" title="A healthy herd is 1 to 10 deer per km²; hunting took the number shown last autumn">
+          {deerCount(w).toLocaleString()} ({(deerCount(w) / Math.max(1, w.N / 100)).toFixed(1)}/km²) · {wolfCount(w)} in {w.packs.length} pack{w.packs.length === 1 ? '' : 's'}
         </span>
         <span class="k">Beaver colonies</span>
         <span class="v">{w.colonies.filter((c) => c.active).length}</span>
