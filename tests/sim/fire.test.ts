@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flatWorld } from '../helpers.ts';
+import { flatWorld, established } from '../helpers.ts';
 import { applyFireEffects, currentSpreadEnv, fireSubstep, grassHeadRateKmh, lengthToBreadth, moistureDamping, projectContains, startFire, surfaceHeadRate } from '../../src/sim/systems/fire.ts';
 import { cellFuel } from '../../src/sim/systems/fuels.ts';
 import { createProject, igniteProjectBurn } from '../../src/sim/systems/projects.ts';
@@ -216,7 +216,7 @@ describe('fire behaviour', () => {
       const w = flatWorld(400, 31, opts);
       w.rng.fire = new Rng('head-' + k + JSON.stringify(opts) + wind);
       w.weather.windSpeed = wind;
-      const fe = startFire(w, 15 * w.W + 10, 'human')!;
+      const fe = established(startFire(w, 15 * w.W + 10, 'human'))!;
       w.sub = 4;
       fireSubstep(w);
       let hx = 0;
@@ -333,7 +333,7 @@ describe('fire behaviour', () => {
         w.rng.fire = new Rng(`aniso-${ang}-${k}`);
         w.weather.windSpeed = 9;
         w.weather.windDir = ang;
-        const fe = startFire(w, 15 * w.W + 15, 'human')!;
+        const fe = established(startFire(w, 15 * w.W + 15, 'human'))!;
         burn(w, 1);
         let best = 0;
         for (let i = 0; i < w.N; i++) {

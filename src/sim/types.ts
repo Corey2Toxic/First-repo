@@ -57,6 +57,8 @@ export interface FireEvent {
   originX: number;
   originY: number;
   startDay: number;
+  /** sub-step of the day it started in (v2; absent in older saves) */
+  startSub?: number;
   detected: boolean;
   detectedDay: number;
   /** Who/what detected it — for the chronicle. */

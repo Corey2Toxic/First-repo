@@ -57,6 +57,15 @@ export function flatWorld(w = 60, h = 40, opts: FlatOpts = {}): World {
   return world;
 }
 
+/**
+ * Mark a fire as past its first hours, when a new start is still building toward the rate its fuel
+ * and wind allow (fire.ts: buildUp). For tests that measure steady spread.
+ */
+export function established<T extends { startSub?: number } | null>(fe: T): T {
+  if (fe) fe.startSub = undefined;
+  return fe;
+}
+
 export function smallWorld(scenario: Parameters<typeof makeConfig>[0] = 'firstseason', seed = 'test-seed-1'): World {
   return generateWorld(makeConfig(scenario, seed, 'small'));
 }

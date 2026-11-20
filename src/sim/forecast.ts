@@ -43,6 +43,8 @@ export interface DayForecast {
   windDir: number;
   /** expected fire-danger class 0..4 */
   dangerClass: number;
+  /** expected median dead-fuel moisture of the valley */
+  fm: number;
   /** published chances 0..1 */
   windEventChance: number;
   rainChance: number;
@@ -190,6 +192,7 @@ export function forecast(w: World, days: number = FORECAST_DAYS): DayForecast[] 
       windSpeed,
       windDir,
       dangerClass,
+      fm,
       windEventChance,
       rainChance,
       stormChance,

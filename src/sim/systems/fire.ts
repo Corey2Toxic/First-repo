@@ -20,6 +20,7 @@ import type { World } from '../world.ts';
 
 const HOURS = 24 / SUBSTEPS_PER_DAY;
 const tmpFuel: CellFuel = { fine: 0, grassShare: 0, ladder: 0, canopy: 0, heavy: 0, green: 0 };
+const houseFuel: CellFuel = { fine: 0, grassShare: 0, ladder: 0, canopy: 0, heavy: 0, green: 0 };
 
 // ---------------------------------------------------------------- naming
 const ROMAN = ['', ' II', ' III', ' IV', ' V', ' VI', ' VII'];
@@ -133,26 +134,29 @@ export function criticalCrownRate(canopyFuel: number): number {
   return 9 / Math.max(0.05, canopyFuel);
 }
 /** Foliar moisture (%): lower in drought, far lower in beetle-killed red crowns. */
-function foliarMoisture(w: World, i: number, f: CellFuel): number {
-  return Math.max(45, 105 - 30 * droughtSeverity(w.climate.droughtIndex) + 12 * f.green - 60 * Math.min(1, w.L.red[i] * 1.5));
+export function foliarMoistureOf(drought: number, green: number, red: number): number {
+  return Math.max(45, 105 - 30 * drought + 12 * green - 60 * Math.min(1, red * 1.5));
 }
+/** Surface intensity (kW/m) at which the stand in cell i torches; Infinity where there is no canopy to torch. */
+export function torchingIntensity(w: World, i: number, f: CellFuel, drought: number = droughtSeverity(w.climate.droughtIndex)): number {
+  if (f.canopy <= 0.25) return Infinity;
+  return crownInitiationIntensity(canopyBaseHeight(f.ladder), foliarMoistureOf(drought, f.green, w.L.red[i]));
+}
+
 const behaviour = { flame: 0, crown: false, intensity: 0 };
 /**
- * Behaviour of a front arriving in cell i at surface rate `rs` (cells/h). `rc` > 0 means it arrives
- * as a crown run at that rate. Returns a shared object: read it before the next call.
+ * Behaviour of a front arriving at surface rate `rs` (cells/h) in fuel that puts `load` kg/m2 into
+ * the flaming front, under a canopy `canopy` that torches at surface intensity `i0`. `rc` > 0 means
+ * it arrives as a crown run at that rate. Returns a shared object: read it before the next call.
+ * (The simulation and the projections both come through here.)
  */
-export function frontBehaviour(w: World, i: number, f: CellFuel, rs: number, rc: number): { flame: number; crown: boolean; intensity: number } {
-  const load = frontLoad(f.fine);
+export function arrivalBehaviour(load: number, canopy: number, i0: number, rs: number, rc: number): { flame: number; crown: boolean; intensity: number } {
   const Is = byramIntensity(load, rs);
-  let crown = false;
-  if (f.canopy > 0.25) {
-    const I0 = crownInitiationIntensity(canopyBaseHeight(f.ladder), foliarMoisture(w, i, f));
-    // torching from below, or a crown run arriving through crowns close enough to carry it (the
-    // crown rate falls away in an open canopy: see spreadRates)
-    crown = Is >= I0 || rc > 0;
-  }
+  // torching from below, or a crown run arriving through crowns close enough to carry it (the crown
+  // rate falls away in an open canopy: see crownRunRate)
+  const crown = canopy > 0.25 && (Is >= i0 || rc > 0);
   if (crown) {
-    const I = byramIntensity(load + 1.1 * f.canopy, Math.max(rs, rc));
+    const I = byramIntensity(load + 1.1 * canopy, Math.max(rs, rc));
     behaviour.intensity = I;
     behaviour.flame = Math.max(3, crownFlameLength(I));
   } else {
@@ -161,6 +165,10 @@ export function frontBehaviour(w: World, i: number, f: CellFuel, rs: number, rc:
   }
   behaviour.crown = crown;
   return behaviour;
+}
+/** Behaviour of a front arriving in cell i, whose fuel is `f` (see arrivalBehaviour). */
+export function frontBehaviour(w: World, i: number, f: CellFuel, rs: number, rc: number): { flame: number; crown: boolean; intensity: number } {
+  return arrivalBehaviour(frontLoad(f.fine), f.canopy, torchingIntensity(w, i, f), rs, rc);
 }
 
 /** How long (hours) a cell holds fire once its front has stopped: heavy fuel and duff, more in drought. */
@@ -267,6 +275,7 @@ export function startFire(w: World, i: number, cause: FireCause, projectId = -1,
     originX: x,
     originY: y,
     startDay: w.day,
+    startSub: w.sub,
     detected: cause === 'prescribed' || cause === 'pile',
     detectedDay: cause === 'prescribed' || cause === 'pile' ? w.day : -1,
     detectedBy: cause === 'prescribed' || cause === 'pile' ? 'crew' : '',
@@ -391,11 +400,19 @@ export interface SpreadEnv {
   fmAdd: number;
   /** diurnal multiplier on the rate of spread */
   spread: number;
+  /** design days only: dead fine-fuel moisture everywhere (instead of each cell's own plus fmAdd) */
+  fm?: number;
+  /** design days only: live greenness everywhere (instead of today's phenology) */
+  green?: number;
+  /** design days only: drought severity 0..1 (instead of this year's) */
+  drought?: number;
 }
 interface StepCtx extends SpreadEnv {
   w: World;
   hooks: FireStepHooks;
   fireById: Map<number, FireEvent>;
+  /** fires still building toward their full rate: id -> fraction of it (see buildUp) */
+  build: Map<number, number>;
 }
 
 // ---------------------------------------------------------------- surface rate of spread
@@ -451,6 +468,8 @@ export function windAdjustment(canopyCover: number): number {
   return 0.4 - 0.28 * Math.min(1, canopyCover);
 }
 
+/** How much a full understory speeds a litter fire (fuel model 10 against 8 and 9). */
+export const UNDERSTORY_LIFT = 1.4;
 /** Moisture of extinction of each fine-fuel component (fraction of dry weight). */
 export const MX_GRASS = 0.15,
   MX_SHRUB = 0.25,
@@ -490,7 +509,12 @@ export function surfaceHeadRate(w: World, n: number, f: CellFuel, u10: number, f
   const pineFrac = conifer > 0.02 ? L.pine[n] / conifer : 0.5;
   const leafy = can > 0.02 ? (L.aspen[n] * 0.6) / can : 0;
   const r0Litter = (6 + 18 * pineFrac) * (1 - 0.5 * leafy);
-  let rLitter = r0Litter * (1 + 0.55 * windTerm) * KE_LITTER;
+  // An understory of saplings and brush lifts and aerates the litter bed: timber litter with
+  // understory (fuel model 10) spreads about three times as fast as compact litter alone (model 8)
+  // at the same mid-flame wind. v1.x's rate ignored everything but the litter's own type, so a
+  // suppressed thicket crept at a fifth of its published rate and no treatment could slow a fire.
+  const bedLift = 1 + UNDERSTORY_LIFT * Math.min(1, L.under[n] + 0.5 * L.shrub[n]);
+  let rLitter = r0Litter * (1 + 0.55 * windTerm) * KE_LITTER * bedLift;
   if (fmDead !== undefined) {
     // live green growth in the bed raises its effective moisture: most in grass, least in litter
     rGrass *= moistureResponse(Math.max(0.02, fmDead + 0.12 * f.green), MX_GRASS);
@@ -545,14 +569,135 @@ const SD = [1, Math.SQRT2, 1, Math.SQRT2, 1, Math.SQRT2, 1, Math.SQRT2, ...Array
 const HALF_GAP = [...Array(16)].map((_, d) => (d < 8 && d % 2 === 0 ? Math.atan2(1, 2) : Math.PI / 4 - Math.atan2(1, 2)) / 2);
 const COS_GAP = HALF_GAP.map(Math.cos),
   SIN_GAP = HALF_GAP.map(Math.sin);
+/** The stencil, for projections that must look in the same directions as the simulation. */
+export const STENCIL = { DX: SX as readonly number[], DY: SY as readonly number[], DIST: SD } as const;
 /** cos(max(0, θ − half gap of direction d)) for an angle θ given by its cosine. */
-function cosResolved(cosT: number, d: number): number {
+export function cosResolved(cosT: number, d: number): number {
   if (cosT >= COS_GAP[d]) return 1;
   const sinT = Math.sqrt(Math.max(0, 1 - cosT * cosT));
   return cosT * COS_GAP[d] + sinT * SIN_GAP[d];
 }
 
+/**
+ * Direction-independent terms of spread into a cell under one environment. The simulation and the
+ * projections (projection.ts) both build their rates from these, so a projected fire and a real one
+ * obey the same formulas.
+ */
+export interface CellTerms {
+  /** holds fuel that can carry fire at all */
+  fuel: boolean;
+  /** surface head rate, cells/h: fuel, moisture, diurnal cycle, retardant, wetting, roads and rivers; before direction, slope and fireline */
+  head: number;
+  /** eccentricity of the surface wind ellipse */
+  ecc: number;
+  /** head rate a crown fire would run at through this canopy on level ground, cells/h (0: no canopy to carry one, or not asked for) */
+  crownPot: number;
+  /** eccentricity of the crown-run ellipse (the same for every cell of an environment) */
+  eccCrown: number;
+  /** Van Wagner's critical rate for a running crown fire here, cells/h */
+  crownCrit: number;
+  /** fine fuel consumed in the flaming front, kg/m2 */
+  load: number;
+  /** crown fuel 0..1 */
+  canopy: number;
+  /** surface intensity (kW/m) at which this stand torches (Infinity: no canopy to torch) */
+  i0: number;
+}
+export function newCellTerms(): CellTerms {
+  return { fuel: false, head: 0, ecc: 0, crownPot: 0, eccCrown: 0, crownCrit: Infinity, load: 0, canopy: 0, i0: Infinity };
+}
+
+const termsFuel: CellFuel = { fine: 0, grassShare: 0, ladder: 0, canopy: 0, heavy: 0, green: 0 };
+/**
+ * Fill `t` for cell n. `crown` asks for the crown-run terms too (they cost a little and only matter
+ * to a front that is crowning); `behaviour` for the torching threshold (projections need it for every
+ * cell; the simulation computes it when a cell ignites).
+ */
+export function cellTerms(env: SpreadEnv, w: World, n: number, t: CellTerms, crown = true, behaviour = true): CellTerms {
+  const L = w.L;
+  const f = cellFuel(w, n, termsFuel, env.green);
+  t.fuel = false;
+  t.head = 0;
+  t.crownPot = 0;
+  t.crownCrit = Infinity;
+  t.i0 = Infinity;
+  t.load = frontLoad(f.fine);
+  t.canopy = f.canopy;
+  // elliptical distribution of the head rate around the wind direction
+  const LB = lengthToBreadth(env.windEff * 3.6, f.grassShare);
+  t.ecc = Math.sqrt(1 - 1 / (LB * LB));
+  // (crown runs capped at 5:1: spotting and wind shifts keep real crown runs wider than the ideal ellipse)
+  const LBc = Math.min(5, lengthToBreadth(env.windEff * 3.6, 0));
+  t.eccCrown = Math.sqrt(1 - 1 / (LBc * LBc));
+  if (f.fine < 0.3) return t;
+  t.fuel = true;
+  const fmDead = env.fm !== undefined ? env.fm : L.fm[n] + env.fmAdd;
+  // what slows fire entering this cell whichever way it comes: retardant, wetting, a road, a fuel
+  // break, a stream; a river and its green banks all but stop surface fire and check a crown fire
+  const k = (1 - 0.9 * L.retard[n]) * (1 - L.wet[n]) * (L.infra[n] & INFRA.ROAD ? 0.5 : 1) * (L.infra[n] & INFRA.FUELBREAK ? 0.35 : 1);
+  const acc = L.flowAcc[n];
+  const kS = acc > 1000 ? k * 0.05 : acc > 300 ? k * 0.6 : k;
+  const kC = acc > 1000 ? k * 0.4 : acc > 300 ? k * 0.6 : k;
+  // m/h → cells/h
+  t.head = (surfaceHeadRate(w, n, f, env.windEff, fmDead) / 100) * env.spread * kS;
+  if (behaviour) t.i0 = torchingIntensity(w, n, f, env.drought !== undefined ? env.drought : droughtSeverity(w.climate.droughtIndex));
+  if (crown && f.canopy > 0.3 && kC > 0) {
+    const fm = Math.max(0.02, fmDead + f.green * (0.06 + 0.06 * f.grassShare));
+    const canopyCov = L.pine[n] + L.fir[n] + L.aspen[n] * 0.6;
+    const windMid = env.windEff * (1 - 0.55 * Math.min(1, canopyCov));
+    // head rate as in v1.0, distributed on a wind ellipse (v1.0's lateral crown rate grew with wind
+    // too, so crown fires were nearly circular and burned ~4x the area of a real crown run)
+    const crownDamp = clamp01(1 - fm / 0.2) * (1 - 0.55 * f.green * (1 - f.grassShare));
+    // (the slowing factor scales the rate and its threshold alike, so it does not change whether
+    // the canopy can carry a running crown fire, only how fast)
+    t.crownPot = CROWN_SCALE * (0.1 + 0.12 * env.windEff) * crownDamp * f.canopy * Math.pow(Math.exp(0.22 * windMid), 0.6) * kC;
+    t.crownCrit = criticalCrownRate(f.canopy) * kC;
+  }
+  return t;
+}
+
+/** Slope factor for a front moving from one elevation to another over `dist` cells: fast uphill, slow down. */
+export function slopeFactor(elevFrom: number, elevTo: number, dist: number): number {
+  const tanPhi = (elevTo - elevFrom) / (dist * 100);
+  return tanPhi > 0 ? Math.exp(3.2 * Math.min(tanPhi, 0.8)) : Math.exp(1.2 * Math.max(tanPhi, -0.8));
+}
+
+/**
+ * Surface rate (cells/h) along a direction at `cosT` from the wind and a slope factor `sf`, into a
+ * cell with fireline of strength `fline`, from a source whose flames are `srcFlame` m long. A line
+ * scraped to mineral soil stops surface fire unless the flames are long enough to reach across it
+ * (v1.x: any line stopped any surface fire, so a ring of hand line beat every other defence).
+ */
+export function surfaceRunRate(head: number, ecc: number, cosT: number, sf: number, fline: number, srcFlame: number): number {
+  const lineHold = fline * (1 - smoothstep(2, 4.5, srcFlame));
+  return head * ((1 - ecc) / (1 - ecc * cosT)) * sf * (1 - lineHold);
+}
+
+/**
+ * Crown-run rate (cells/h) along a direction. Van Wagner's (1977) second criterion: flame is
+ * sustained from crown to crown only if the fire moves fast enough for the canopy's bulk density,
+ * R >= 3 / CBD m/min. Below that, trees torch singly and in groups and the front keeps its surface
+ * rate (passive crowning). A running crown fire therefore needs both a strong wind and crowns close
+ * together: thinning a stand from a canopy of 0.75 to 0.4 cuts the ratio almost fourfold.
+ */
+export function crownRunRate(crownPot: number, crownCrit: number, eccCrown: number, cosT: number, sf: number, fline: number): number {
+  const head = crownPot * Math.pow(sf, 0.7);
+  return head * ((1 - eccCrown) / (1 - eccCrown * cosT)) * (1 - 0.5 * fline) * smoothstep(0.6, 1, head / crownCrit);
+}
+
+/**
+ * Chance, per attempt, that a surface front gets across a road or a fuel break: next to nothing for a
+ * cool, calm edge; flames long enough to reach across, and wind, are what carry fire over. (v2: fires
+ * lean on a road for days and unfinished crossings are remembered, so the chance per attempt of a
+ * calm edge is far smaller than v1.x's 0.4 %.)
+ */
+export function roadBreachChance(windEff: number, cosW: number, srcFlame: number, fuelbreak: boolean): number {
+  const push = smoothstep(3, 12, windEff * Math.max(0, cosW)) * 0.5 + smoothstep(1.2, 3.5, srcFlame) * 0.4;
+  return clamp01(0.0002 + push) * (fuelbreak ? 0.6 : 1);
+}
+
 const rates = { rs: 0, rc: 0, fuel: false };
+const stepTerms: CellTerms = newCellTerms();
 /**
  * Rates of spread (cells/hour) from burning cell b into cell n along stencil direction d, left in
  * `rates`: `rs` over the surface, `rc` through the crowns (0 unless the source is crowning and n has
@@ -560,69 +705,25 @@ const rates = { rs: 0, rc: 0, fuel: false };
  */
 function spreadRates(env: SpreadEnv, w: World, b: number, n: number, d: number, crownSrc: boolean): void {
   const L = w.L;
-  const f = tmpFuel;
+  const t = cellTerms(env, w, n, stepTerms, crownSrc, false);
   rates.rs = 0;
   rates.rc = 0;
-  rates.fuel = false;
-  cellFuel(w, n, f);
-  if (f.fine < 0.3) return;
-  rates.fuel = true;
-  const fmDead = L.fm[n] + env.fmAdd;
-  const head = surfaceHeadRate(w, n, f, env.windEff, fmDead);
-  if (head <= 0 && !crownSrc) return;
-  const fm = Math.max(0.02, fmDead + f.green * (0.06 + 0.06 * f.grassShare));
+  rates.fuel = t.fuel;
+  if (!t.fuel) return;
+  const crownOn = crownSrc && t.crownPot > 0;
+  if (t.head <= 0 && !crownOn) return;
   const dist = SD[d];
   const cosT = cosResolved((SX[d] * env.wdx + SY[d] * env.wdy) / dist, d);
-  const tanPhi = (L.elev[n] - L.elev[b]) / (dist * 100);
-  const sf = tanPhi > 0 ? Math.exp(3.2 * Math.min(tanPhi, 0.8)) : Math.exp(1.2 * Math.max(tanPhi, -0.8));
-  // elliptical distribution of the head rate around the wind direction
-  const LB = lengthToBreadth(env.windEff * 3.6, f.grassShare);
-  const e = Math.sqrt(1 - 1 / (LB * LB));
-  const dir = (1 - e) / (1 - e * cosT);
-  // m/h → cells/h; fireline scraped to mineral soil stops surface fire
-  // a line scraped to mineral soil stops surface fire, unless the flames are long enough to reach
-  // across it (v1.x: any line stopped any surface fire, so a ring of hand line beat every other defence)
-  const lineHold = L.fline[n] * (1 - smoothstep(2, 4.5, L.fint[b]));
-  let R = (head / 100) * dir * sf * env.spread * (1 - lineHold);
-  let Rc = 0;
-  if (crownSrc && f.canopy > 0.3) {
-    const canopyCov = L.pine[n] + L.fir[n] + L.aspen[n] * 0.6;
-    const windMid = env.windEff * (1 - 0.55 * Math.min(1, canopyCov));
-    // head rate as in v1.0, distributed on a wind ellipse (v1.0's lateral crown rate grew with wind
-    // too, so crown fires were nearly circular and burned ~4x the area of a real crown run)
-    const wfHead = Math.exp(0.22 * windMid);
-    // (capped at 5:1: spotting and wind shifts keep real crown runs wider than the ideal ellipse)
-    const LBc = Math.min(5, lengthToBreadth(env.windEff * 3.6, 0));
-    const ec = Math.sqrt(1 - 1 / (LBc * LBc));
-    const crownDamp = clamp01(1 - fm / 0.2) * (1 - 0.55 * f.green * (1 - f.grassShare));
-    // the rate a crown fire would run at through this canopy, at the head
-    const head = CROWN_SCALE * (0.1 + 0.12 * env.windEff) * crownDamp * f.canopy * Math.pow(wfHead, 0.6) * Math.pow(sf, 0.7);
-    // Van Wagner's (1977) second criterion: flame is sustained from crown to crown only if the fire
-    // moves fast enough for the canopy's bulk density, R >= 3 / CBD m/min. Below that, trees torch
-    // singly and in groups and the front keeps its surface rate (passive crowning). A running crown
-    // fire therefore needs both a strong wind and crowns close together: thinning a stand from a
-    // canopy of 0.75 to 0.4 cuts this ratio almost fourfold.
-    const active = head / criticalCrownRate(f.canopy);
-    Rc = head * ((1 - ec) / (1 - ec * cosT)) * (1 - 0.5 * L.fline[n]) * smoothstep(0.6, 1, active);
-  }
-  let k = (1 - 0.9 * L.retard[n]) * (1 - L.wet[n]);
-  if (L.infra[n] & INFRA.ROAD) k *= 0.5;
-  if (L.infra[n] & INFRA.FUELBREAK) k *= 0.35;
-  const acc = L.flowAcc[n];
-  if (acc > 1000) {
-    // a river and its green banks: surface fire all but stops, crown fire is checked
-    R *= 0.05;
-    Rc *= 0.4;
-  } else if (acc > 300) k *= 0.6;
-  rates.rs = R * k;
-  rates.rc = Rc * k;
+  const sf = slopeFactor(L.elev[b], L.elev[n], dist);
+  rates.rs = surfaceRunRate(t.head, t.ecc, cosT, sf, L.fline[n], L.fint[b]);
+  if (crownOn) rates.rc = crownRunRate(t.crownPot, t.crownCrit, t.eccCrown, cosT, sf, L.fline[n]);
 }
 
 /** Can a knight-move path cross cell c? Only burning or burnable, unbroken ground lets fire through. */
 const passFuel: CellFuel = { fine: 0, grassShare: 0, ladder: 0, canopy: 0, heavy: 0, green: 0 };
-function passable(w: World, c: number): boolean {
+export function passableGround(w: World, c: number): boolean {
   const L = w.L;
-  // no hopping over a river or stream channel (fire entering one is slowed to 12-60 %)
+  // no hopping over a river or stream channel (fire entering one is slowed to 5-60 %)
   if (L.water[c] !== 0 || L.flowAcc[c] > 300 || L.pond[c] > 0.35 || L.town[c] !== 0) return false;
   if (L.infra[c] & (INFRA.ROAD | INFRA.FUELBREAK) || L.fline[c] > 0.5 || L.retard[c] > 0.5 || L.wet[c] > 0.5) return false;
   if (L.fire[c] === FIRE.BURNING) return true;
@@ -631,17 +732,45 @@ function passable(w: World, c: number): boolean {
   return passFuel.fine >= 0.3;
 }
 
+/**
+ * A fire starts as a point. For its first hours, until its head is a couple of hundred metres wide,
+ * it runs well below the rate the fuel and wind would give a line of fire (Cheney & Gould 1995), and
+ * its flames are shorter for it: the hours in which initial attack catches most fires.
+ * `steps` is the number of 3-hour steps since it started, `area` its size in ha.
+ * (v1.x and the first v2 builds started every fire at its full rate: on a windy afternoon a new
+ * start was 50-190 ha before the first crew could be sent, and nothing was caught on a bad day.)
+ */
+export const BUILD_AREA = 6;
+export function buildUp(steps: number, area: number): number {
+  return area >= BUILD_AREA || steps >= 2 ? 1 : steps <= 0 ? 0.35 : 0.7;
+}
+/** Steps since a fire started (large for fires from saves that predate the record). */
+export function fireAgeSteps(w: World, fe: FireEvent): number {
+  return fe.startSub === undefined ? 99 : (w.day - fe.startDay) * SUBSTEPS_PER_DAY + (w.sub - fe.startSub);
+}
+
 /** Remaining burn time (h) at or below which a cell has been put out by crews. */
 export const KNOCKED_DOWN = 0.02;
 /** A front that has stopped creeps on through litter and duff at a fraction of the surface rate. */
-const HOLD_VIGOR = 0.15;
+export const HOLD_VIGOR = 0.15;
 /** Flame length of a holding (smouldering) edge, m. */
 function smoulderFlame(w: World): number {
   return 0.1 + 0.2 * droughtSeverity(w.climate.droughtIndex);
 }
-/** Chance per 3-hour step that a house next to flames of the given length catches (before firewise and engines). */
-function structureExposure(flame: number): number {
-  return Math.min(0.5, 0.045 * flame);
+/**
+ * Chance per 3-hour step that a house catches from one burning neighbour cell with flames of the
+ * given length (before firewise and engines). Steeply convex, as radiant and convective heat are: a
+ * litter fire creeping past with half-metre flames rarely takes a house, flames of two or three
+ * metres often do, and a crown fire at the fence usually does. A front passing a house exposes it
+ * about six times (several sides, a step or two each): ~2 % of unhardened homes lost at 0.5 m,
+ * ~8 % at 1 m, ~20 % at 1.5 m, ~55 % at 2.5 m, ~90 % under crown fire.
+ * (v2 first used a linear 0.045 per metre capped at 0.5, and before that v1.x used a proxy of fuel
+ * load: either way a town lost nearly every home a fire reached whether or not the ground beside it
+ * had been thinned and burned, which made the game's central work pointless where it matters most.)
+ */
+export function structureExposure(flame: number, grassShare = 0): number {
+  // a grass front is tall but gone in seconds: it delivers far less heat to a wall than timber does
+  return Math.min(0.35, 0.014 * Math.pow(flame, 2.4)) * (1 - 0.6 * grassShare);
 }
 
 const nbrRs = new Float32Array(16);
@@ -686,7 +815,7 @@ function scheduleFrom(ctx: StepCtx, b: number, t0: number, prior: boolean): void
         hy = longX ? 0 : SY[d] / 2;
       const c1 = (by + hy) * W + bx + hx,
         c2 = (by + (longX ? SY[d] : hy)) * W + bx + (longX ? hx : SX[d]);
-      if (!passable(w, c1) || !passable(w, c2)) continue;
+      if (!passableGround(w, c1) || !passableGround(w, c2)) continue;
     }
     if (L.town[n] > 0) {
       // radiant heat and embers from neighbouring fire onto houses
@@ -694,7 +823,7 @@ function scheduleFrom(ctx: StepCtx, b: number, t0: number, prior: boolean): void
       const fw = town ? town.firewise : 0;
       // house to house: rare in still air, a conflagration in wind (v1.x: a flat 0.16, so below
       // firewise ~0.5 one burning house took a neighbourhood whatever the weather)
-      const p = (isStructure ? 0.03 + 0.012 * ctx.windEff : structureExposure(L.fint[b])) * (1 - 0.75 * fw) * (1 - structureProtection(w, n));
+      const p = (isStructure ? 0.03 + 0.012 * ctx.windEff : structureExposure(L.fint[b], cellFuel(w, b, houseFuel).grassShare)) * (1 - 0.75 * fw) * (1 - structureProtection(w, n));
       if (p > 0) {
         const rate = -Math.log(1 - Math.min(0.999, p)) / HOURS;
         const tau = r.exponential(1 / rate);
@@ -712,11 +841,7 @@ function scheduleFrom(ctx: StepCtx, b: number, t0: number, prior: boolean): void
       const cosW = (SX[d] * ctx.wdx + SY[d] * ctx.wdy) / SD[d];
       // (per attempt; a long front makes many attempts, so a light-wind fire crosses only rarely
       // while a wind-driven head fire still gets across)
-      // (v2: fires now lean on a road for days and unfinished crossings are remembered, so the chance
-      // per attempt of a cool, calm edge getting across is far smaller than v1.x's 0.4 %; flames
-      // long enough to reach across, and wind, are what carry fire over)
-      const push = smoothstep(3, 12, ctx.windEff * Math.max(0, cosW)) * 0.5 + smoothstep(1.2, 3.5, L.fint[b]) * 0.4;
-      const breach = clamp01(0.0002 + push) * (L.infra[n] & INFRA.FUELBREAK ? 0.6 : 1);
+      const breach = roadBreachChance(ctx.windEff, cosW, L.fint[b], (L.infra[n] & INFRA.FUELBREAK) !== 0);
       if (r.next() >= breach) continue;
     }
     if (rmax > potential) potential = rmax;
@@ -725,8 +850,9 @@ function scheduleFrom(ctx: StepCtx, b: number, t0: number, prior: boolean): void
     nbrRc[k] = rates.rc;
     k++;
   }
-  // 2. a holding edge picks up again when the air dries and the wind rises
-  let vigor = 1;
+  // 2. a young fire is still building; a holding edge picks up again when the air dries and the wind rises
+  const build = isStructure ? 1 : (ctx.build.get(L.fid[b]) ?? 1);
+  let vigor = build;
   if (prior && !isStructure) {
     if (L.fphase[b] === 1) {
       vigor = HOLD_VIGOR;
@@ -734,7 +860,7 @@ function scheduleFrom(ctx: StepCtx, b: number, t0: number, prior: boolean): void
         const dryness = clamp01((0.17 - (L.fm[b] + ctx.fmAdd)) / 0.09);
         if (r.next() < 0.3 * dryness * (0.5 + ctx.windEff / 8)) {
           L.fphase[b] = 0;
-          vigor = 1;
+          vigor = build;
         }
       }
     }
@@ -825,7 +951,14 @@ export function fireSubstep(w: World, hooks: FireStepHooks = {}): void {
   const di = { fmAdd: env.fmAdd };
   const fireById = new Map<number, FireEvent>();
   for (const fe of w.fires) if (fe.active) fireById.set(fe.id, fe);
-  const ctx: StepCtx = { w, hooks, fireById, ...env };
+  // how far each fire has built toward its full rate (prescribed burns are lit as a line)
+  const build = new Map<number, number>();
+  for (const fe of fireById.values()) {
+    if (fe.cause === 'prescribed') continue;
+    const k = buildUp(fireAgeSteps(w, fe), fe.area);
+    if (k < 1) build.set(fe.id, k);
+  }
+  const ctx: StepCtx = { w, hooks, fireById, build, ...env };
   const f = tmpFuel;
   if (progNew.length !== w.N) {
     progNew = new Float32Array(w.N);

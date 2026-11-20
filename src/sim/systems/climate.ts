@@ -116,7 +116,9 @@ export function generateWeather(w: World): void {
     const outletDir = w.outletCell >= 0 && w.outletCell % w.W === 0 ? Math.PI : 0;
     windDir = outletDir + r.normal(0, 0.18);
   }
-  if (storm) windSpeed = Math.max(windSpeed, r.range(5, 11)); // outflow gusts
+  // Outflow gusts. (v1.x raised the whole day's wind to 5-11 m/s on every storm day, so each
+  // lightning fire was born into a gale; it went unnoticed while fires did not spread as specified.)
+  if (storm) windSpeed = Math.max(windSpeed, r.range(3.5, 8));
   windSpeed = clamp(windSpeed, 0.3, 20);
 
   const temp = base + c.tempAR + (windEvent ? 2 : 0) - (precip > 2 ? 2 : 0);

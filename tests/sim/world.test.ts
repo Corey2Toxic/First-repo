@@ -42,7 +42,9 @@ describe('world generation', () => {
       expect(w.landmarks.filter((l) => l.kind === 'peak').length).toBeGreaterThan(2);
       expect(new Set(w.landmarks.map((l) => l.name)).size).toBe(w.landmarks.length);
       expect(w.roads.length).toBeGreaterThan(2);
-      expect(w.crews.length).toBe(3);
+      // three hand crews and two engines (1.x: two and one)
+      expect(w.crews.filter((c) => c.kind === 'hand').length).toBe(3);
+      expect(w.crews.filter((c) => c.kind === 'engine').length).toBe(2);
     });
   }
 

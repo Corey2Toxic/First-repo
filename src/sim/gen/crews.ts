@@ -1,6 +1,8 @@
 /**
- * Starting crews: hand crews at the two largest towns and an engine at the
- * main station.
+ * Starting crews: two hand crews and an engine at the main station, a hand crew and an engine at
+ * the second town. (v1.x started every valley with two hand crews and one engine: once fires behave
+ * as specified that is one small fire's worth, and a second fire on the same day went unstaffed for
+ * days. The council's allocation has always covered the larger roster.)
  */
 import type { Crew, CrewKind } from '../types.ts';
 import type { World } from '../world.ts';
@@ -36,4 +38,6 @@ export function initCrews(w: World, names: NameBank): void {
   w.crews.push(makeCrew(w, 'hand', main.station, names.crewName('hand', 1)));
   w.crews.push(makeCrew(w, 'hand', second.station, names.crewName('hand', 2)));
   w.crews.push(makeCrew(w, 'engine', main.station, names.crewName('engine', 1)));
+  w.crews.push(makeCrew(w, 'hand', main.station, names.crewName('hand', 3)));
+  w.crews.push(makeCrew(w, 'engine', second.station, names.crewName('engine', 2)));
 }

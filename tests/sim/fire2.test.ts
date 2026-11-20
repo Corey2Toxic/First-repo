@@ -3,7 +3,7 @@
  * differently the comment gives what it did (measured with scripts/v2 on the 1.1.1 tree).
  */
 import { describe, expect, it } from 'vitest';
-import { flatWorld } from '../helpers.ts';
+import { established, flatWorld } from '../helpers.ts';
 import type { FlatOpts } from '../helpers.ts';
 import {
   FLAME_LIMIT,
@@ -50,7 +50,7 @@ function realised(opts: FlatOpts, wind: number, fm: number, sub: number, hours: 
     w.weather.windSpeed = wind;
     w.sub = sub;
     const c = 20 * w.W + 20;
-    startFire(w, c, 'lightning');
+    established(startFire(w, c, 'lightning'));
     for (let s = 0; s < hours / 3; s++) {
       w.sub = sub;
       for (const b of w.burning) {
@@ -94,7 +94,7 @@ describe('fire core v2: spread that keeps its place', () => {
     w.rng.fire = new Rng('prog');
     w.weather.windSpeed = 6;
     const c = 5 * w.W + 10;
-    startFire(w, c, 'lightning');
+    established(startFire(w, c, 'lightning'));
     w.sub = 4;
     fireSubstep(w);
     const ahead = w.L.fprog[c + 1];

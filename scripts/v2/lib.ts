@@ -69,6 +69,8 @@ export interface Bed {
   dead?: number;
   ageP?: number;
   ageF?: number;
+  /** understory of saplings and pole thickets, 0..1 (v2 trees only) */
+  under?: number;
   /** published behaviour of the nearest standard fuel model, for the table */
   ref?: string;
 }
@@ -94,6 +96,7 @@ export function flatValley(S: Sim, bed: Bed, o: { w?: number; h?: number; fm?: n
     L.litter[i] = bed.litter ?? 1;
     L.dead[i] = bed.dead ?? 2;
     L.fm[i] = o.fm ?? 0.06;
+    if (L.under) L.under[i] = bed.under ?? 0;
   }
   w.day = 150; // late summer: grass cured
   w.sub = o.sub ?? 4;
@@ -112,7 +115,7 @@ export const BEDS: Bed[] = [
   { name: 'open pine, needle litter', pine: 0.55, litter: 6, dead: 8, ageP: 130, ref: 'FM9: 100-150 m/h, 0.8-1 m' },
   { name: 'pine + grass understory', pine: 0.4, grass: 0.5, litter: 4, dead: 6, ageP: 130, ref: 'FM2: 400-700 m/h, 1.5-2 m' },
   { name: 'closed fir, short needles', fir: 0.85, litter: 8, dead: 15, ageF: 140, ref: 'FM8: 20-40 m/h, 0.3 m' },
-  { name: 'suppressed mixed thicket', pine: 0.4, fir: 0.45, shrub: 0.3, litter: 16, dead: 30, ageP: 110, ageF: 35, ref: 'FM10: 100-180 m/h, 1.5 m, torching' },
+  { name: 'suppressed mixed thicket', pine: 0.4, fir: 0.45, shrub: 0.3, litter: 16, dead: 30, ageP: 110, ageF: 35, under: 0.85, ref: 'FM10: 100-180 m/h, 1.5 m, torching' },
   { name: 'aspen, leaf litter', aspen: 0.8, grass: 0.3, litter: 3, dead: 4, ref: 'slow; a natural fuel break' },
 ];
 

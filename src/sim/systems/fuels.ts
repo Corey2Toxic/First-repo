@@ -18,9 +18,10 @@ export interface CellFuel {
 /** How much a full understory adds to ladder-fuel continuity. */
 export const UNDER_LADDER = 0.65;
 
-export function cellFuel(w: World, i: number, out?: CellFuel): CellFuel {
+export function cellFuel(w: World, i: number, out?: CellFuel, green?: number): CellFuel {
   const L = w.L;
-  const g = greenness(w, i);
+  // (design-day analyses pin the curing of late summer instead of today's phenology)
+  const g = green !== undefined ? green : greenness(w, i);
   // a burn leaves no cured grass to carry fire until the next season's crop has grown and cured
   // (v1.0 hid this behind a rate that collapsed at low fuel load)
   const since = w.yearF - L.lastBurn[i];
