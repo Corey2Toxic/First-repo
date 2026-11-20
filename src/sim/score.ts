@@ -35,12 +35,12 @@ function shareOf(xs: number[], ok: (x: number) => boolean, fallback: number): nu
 
 /**
  * Grade bands. Re-based in v1.1 on that version's strategy bots, and again in 2.0 on its own
- * (scripts/v2/bots.ts, verification seeds, whole tenures): doing nothing and refusing every petition
- * averages 72 in the Tinderbox (8 valleys) and 71 in First Season (6) and earns a C; more crews,
- * lookouts and air patrol with no work on the land averages 80, a B; thinning, burning and hardening
- * homes from the Fireshed lens every year averages 89 in the Tinderbox, an A, and 94 in First Season.
- * An S asks for all of that with nothing going wrong: the script reached 95 in five of fourteen
- * tenures. (1.1's bands were 90 / 83 / 76 / 64 / 50.)
+ * (scripts/v2/bots.ts, verification seeds, whole tenures, final charges): doing nothing and refusing
+ * every petition averages 70 in the Tinderbox (8 valleys) and 70 in First Season (6) and earns a C;
+ * more crews, lookouts and air patrol with no work on the land averages 78, the bottom of a B;
+ * thinning, burning and hardening homes from the Fireshed lens every year averages 90 in the
+ * Tinderbox, an A, and 94 in First Season. An S asks for all of that with nothing going wrong: the
+ * script reached 95 in five of fourteen tenures. (1.1's bands were 90 / 83 / 76 / 64 / 50.)
  */
 export const GRADES: Array<[number, string, string]> = [
   [95, 'S', 'Legend of the Valley'],
