@@ -82,12 +82,12 @@ advances close to the specified rate in every wind direction. See `FIRE_MODEL.md
 
 | Module | Role |
 |---|---|
-| `sim/systems/fire.ts` | Spread progress kept between steps (`fprog`); Byram intensity and flame length; Van Wagner crowning; advancing and holding fronts; build-up of new fires; house ignition by flame length. Rate terms are exported (`cellTerms`, `surfaceRunRate`, `crownRunRate`, `arrivalBehaviour`) so that nothing else has to copy them. |
+| `sim/systems/fire.ts` | Spread progress kept between steps (`fprog`); Byram intensity and flame length; Van Wagner crowning; advancing and holding fronts; build-up of new fires; a burn scar that carries no fire for a season; house ignition by flame length. Rate terms are exported (`cellTerms`, `surfaceRunRate`, `crownRunRate`, `arrivalBehaviour`) so that nothing else has to copy them. |
 | `sim/forecast.ts` | Weather has its own random stream, so the true weather of the coming days is generated on a shadow copy of the climate state and published through a noisy channel whose skill falls with lead time. No hidden second model of the weather. |
 | `sim/projection.ts` | `projectSpread` (forward) and `computeFireshed` (reverse): expected-travel-time searches over the spread stencil with the simulation's own rate terms. Pure: no random draws, no state change (tested with the state hash). `refreshExposure` stores the towns' design-day exposure in world memory once a year. |
 | `sim/incident.ts` | A fire's stage, the morning briefing, the fire-weather watch, the season outlook, and the after-action report built just before a finished fire's cells are released. |
 | `sim/objectives.ts` | Each scenario's three charges as pure readings of the world. |
-| `sim/systems/crews.ts`, `projects.ts` | Edge-based dispatch and re-prioritisation, outside incident teams, project planner without deadlock, burn go/no-go from the fire model and the forecast. |
+| `sim/systems/crews.ts`, `projects.ts` | Edge-based dispatch in two passes (a working minimum for every fire, then the rest) and re-prioritisation; outside incident teams; all emergency fire spending through one function (`spendEmergency`) that stops at the credit limit; project planner without deadlock; burn go/no-go from the fire model and the forecast. |
 | `app/session.ts` | Caches the forecast (per day), the projection (per sub-step, throttled) and the firesheds (per month or when treatments change); slows or pauses on notifications the simulation flags (`Notification.stop`); "next event". |
 | `scripts/v2/*` | Measurement harnesses that load the simulation from any source tree (`FW_ROOT`), so every before/after figure in the reports can be re-run on the preserved 1.1.1 branch. |
 
