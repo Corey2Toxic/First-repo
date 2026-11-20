@@ -986,6 +986,12 @@ canvas.chart {
   overflow-y: auto;
 }
 
+/* the dock gained a button in 2.0 and reaches under the feed on screens narrower than this */
+@media (max-width: 1560px) {
+  .feed {
+    bottom: 60px;
+  }
+}
 @media (max-width: 1100px) {
   .topbar .wx .hum {
     display: none;

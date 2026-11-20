@@ -69,6 +69,13 @@ const row = {
   aidCost: Math.round(aidCost),
   longFires: cnt((f) => f.days >= 7),
   longestDays: Math.max(0, ...fires.map((f) => f.days)),
+  // how long fires last: all of them, and those that got past 10 ha
+  outInADay: +(cnt((f) => f.days <= 1) / n).toFixed(3),
+  escaped: cnt((f) => f.area >= 10),
+  escapedOutInADay: +(cnt((f) => f.area >= 10 && f.days <= 1) / Math.max(1, cnt((f) => f.area >= 10))).toFixed(3),
+  escapedThreeDays: +(cnt((f) => f.area >= 10 && f.days >= 3) / Math.max(1, cnt((f) => f.area >= 10))).toFixed(3),
+  // share of all wildfire area that burned in fires of 1,000 ha or more
+  areaInBigFires: +(fires.filter((f) => f.area >= 1000).reduce((a, f) => a + f.area, 0) / Math.max(1, fires.reduce((a, f) => a + f.area, 0))).toFixed(3),
   trust: Math.round(w.trust),
   funds: Math.round(w.economy.funds),
   ended: w.outcome.ended ? w.outcome.reason + '@' + w.outcome.year : '',

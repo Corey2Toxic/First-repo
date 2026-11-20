@@ -71,6 +71,11 @@ const cols: Array<[string, string, (r: Row) => number, number]> = [
   ['supp $k/yr', 'suppressionPerYear', (r) => num(r, 'suppressionPerYear') / 1000, 0],
   ['aid calls', 'aidTeams', (r) => num(r, 'aidTeams'), 1],
   ['longest d', 'longestDays', (r) => num(r, 'longestDays'), 0],
+  ['out in 1 d %', 'outInADay', (r) => 100 * num(r, 'outInADay'), 0],
+  ['escaped (>=10 ha)', 'escaped', (r) => num(r, 'escaped'), 1],
+  [' out in 1 d %', 'escapedOutInADay', (r) => 100 * num(r, 'escapedOutInADay'), 0],
+  [' 3 d or more %', 'escapedThreeDays', (r) => 100 * num(r, 'escapedThreeDays'), 0],
+  ['area in >=1k %', 'areaInBigFires', (r) => 100 * num(r, 'areaInBigFires'), 0],
   ['trust', 'trust', (r) => num(r, 'trust'), 0],
   ['funds $k', 'funds', (r) => num(r, 'funds') / 1000, 0],
   ['years run', 'years', (r) => num(r, 'years'), 1],
@@ -83,7 +88,7 @@ for (const sc of scenarios) {
   for (const [label, , f, digits] of cols) {
     const v = rs.map(f);
     const mean = v.reduce((a, b) => a + b, 0) / v.length;
-    console.log(`  ${label.padEnd(11)} ${mean.toFixed(digits).padStart(8)}   [${Math.min(...v).toFixed(digits)} .. ${Math.max(...v).toFixed(digits)}]`);
+    console.log(`  ${label.padEnd(18)} ${mean.toFixed(digits).padStart(8)}   [${Math.min(...v).toFixed(digits)} .. ${Math.max(...v).toFixed(digits)}]`);
   }
 }
 if (process.env.FW_BATCH_JSON) console.log('\n' + JSON.stringify(rows));
