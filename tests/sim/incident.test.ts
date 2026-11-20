@@ -8,7 +8,8 @@ import { established, flatWorld, smallWorld } from '../helpers.ts';
 import type { FlatOpts } from '../helpers.ts';
 import { applyFireEffects, defaultResponse, fireSubstep, startFire } from '../../src/sim/systems/fire.ts';
 import { applyThinning } from '../../src/sim/systems/projects.ts';
-import { crewsDaily, crewsSubstep, requestAid } from '../../src/sim/systems/crews.ts';
+import { crewsDaily, crewsSubstep, requestAid, spendEmergency } from '../../src/sim/systems/crews.ts';
+import { applyCommand } from '../../src/sim/commands.ts';
 import { makeCrew } from '../../src/sim/gen/crews.ts';
 import { ESCAPED_AREA, MAJOR_AREA, fireStage, morningBriefings, updateIncidents } from '../../src/sim/incident.ts';
 import { makeEventHooks } from '../../src/sim/events.ts';
@@ -226,7 +227,7 @@ describe('after-action reports', () => {
     expect(rep.area - rep.treatedArea).toBeGreaterThan(300);
     const treated = rep.treatedHigh / rep.treatedArea,
       rest = rep.untreatedHigh / (rep.area - rep.treatedArea);
-    expect(rest).toBeGreaterThan(0.5); // the thicket crowned
+    expect(rest).toBeGreaterThan(0.3); // the thicket torched wherever the front came at it head-on
     expect(treated).toBeLessThan(rest * 0.4); // the prepared half mostly did not
     expect(rep.text.join(' ')).toMatch(/thinned or burned in the last 12 years: \d+ % of that burned severely, against \d+ % of the rest/);
     // and seeing it is worth a field note
@@ -425,7 +426,7 @@ describe('mutual aid and money', () => {
   });
 
 
-  it('an outside team is sent home when the county will extend no more credit, instead of bankrupting the service', () => {
+  it('emergency fire spending stops at the credit limit: the state carries the fires, the team stays, the warden is told once', () => {
     const w = flatWorld(120, 60, PINE);
     w.weather.windSpeed = 2;
     w.climate.droughtIndex = 0.15;
@@ -435,22 +436,32 @@ describe('mutual aid and money', () => {
     fe.detected = true;
     fe.detectedDay = w.day;
     for (let k = 1; k <= 40; k++) startFire(w, 30 * w.W + 60 + k, 'lightning');
-    w.economy.funds = COST.aidPerDay * 2.5 - EMERGENCY_CREDIT; // enough credit for two more days
-    requestAid(w, fe);
-    const notes: string[] = [];
-    let released = 0;
-    for (let d = 0; d < 6; d++) {
+    w.economy.funds = COST.aidMobilize + COST.aidPerDay * 2.5 - EMERGENCY_CREDIT; // credit for the call and two and a half days
+    const team = requestAid(w, fe);
+    let released = 0,
+      told = 0;
+    for (let d = 0; d < 8; d++) {
       w.day++;
       for (const b of w.burning) w.L.ftime[b] = 48; // the fire stays alive
-      crewsDaily(w, { onAidReleased: (_t, _f, unpaid) => (released++, notes.push(String(unpaid))) });
+      crewsDaily(w, { onAidReleased: () => released++, onStateCarries: () => told++ });
     }
-    expect(released).toBe(1);
-    expect(notes[0]).toBe('true');
-    expect(w.economy.funds).toBeGreaterThanOrEqual(-EMERGENCY_CREDIT);
-    expect(w.crews.filter((c) => c.aid !== undefined).length).toBe(0);
+    // 1.x-style accounting would have taken the service to -$320k and on; the first 2.0 rule sent
+    // the team home with the fire still burning
+    expect(released).toBe(0);
+    expect(w.crews.filter((c) => c.aid !== undefined).length).toBeGreaterThan(4);
+    expect(w.economy.funds).toBeCloseTo(-EMERGENCY_CREDIT, 0);
+    expect(team.cost).toBeCloseTo(COST.aidMobilize + COST.aidPerDay * 2.5, 0);
+    expect(told).toBe(1);
+    // crew overtime is carried the same way
+    const before = w.economy.funds;
+    expect(spendEmergency(w, 'Suppression', 5000)).toBe(0);
+    expect(w.economy.funds).toBe(before);
+    // and with money in hand the service pays in full
+    w.economy.funds = 100_000;
+    expect(spendEmergency(w, 'Suppression', 5000)).toBe(5000);
   });
 
-  it('the standing order does not call a team the service cannot pay for', () => {
+  it('the standing order does not call a team with nothing in hand (the warden still can)', () => {
     const w = flatWorld(160, 60, GRASS);
     w.weather.windSpeed = 6;
     w.climate.droughtIndex = 0.15;
@@ -463,12 +474,19 @@ describe('mutual aid and money', () => {
       fireSubstep(w);
     }
     expect(fe.area).toBeGreaterThan(150);
-    w.economy.funds = 50_000;
+    w.economy.funds = 10_000;
     crewsDaily(w);
     expect(w.aid.length).toBe(0);
     w.economy.funds = 1_000_000;
     crewsDaily(w);
     expect(w.aid.length).toBe(1);
     expect(w.aid[0].auto).toBe(true);
+    // the warden's own call is never refused for want of money
+    const w2 = flatWorld(160, 60, GRASS);
+    const f2 = startFire(w2, 30 * w2.W + 40, 'lightning')!;
+    f2.detected = true;
+    w2.economy.funds = -EMERGENCY_CREDIT;
+    expect(applyCommand(w2, { t: 'aid', fireId: f2.id, on: true }).ok).toBe(true);
+    expect(w2.economy.funds).toBe(-EMERGENCY_CREDIT);
   });
 });

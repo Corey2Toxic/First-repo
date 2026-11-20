@@ -28,8 +28,12 @@ export const COST = {
 
 /** The valley's share of crew overtime on a major incident (the state pays the rest). */
 export const MAJOR_INCIDENT_SHARE = 0.25;
-/** How far into debt emergency fire spending may take the service before the county stops paying. */
-export const EMERGENCY_CREDIT = 400_000;
+/**
+ * How far into debt emergency fire spending (crew overtime, outside teams, air drops) may take the
+ * service. Beyond it the state carries the cost of the fires: a fire season, however bad, cannot by
+ * itself put the service into receivership (that takes -$600k, and wages the budget cannot carry).
+ */
+export const EMERGENCY_CREDIT = 200_000;
 
 export const CREW_COST = {
   hand: { hire: 25_000, yearly: 165_000 },

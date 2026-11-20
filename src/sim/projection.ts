@@ -457,8 +457,16 @@ export interface Fireshed {
 const BUILD_FIRST = 0.35,
   START_GAIN = HOURS * BUILD_FIRST,
   START_LOSS = HOURS * (1 - BUILD_FIRST);
-/** How many times, on average, each burning side exposes a house as a front passes. */
-const EXPOSURES_PER_SIDE = 1.6;
+/**
+ * How a passing front exposes a house, fitted to what the simulation takes in six lab cases
+ * (scripts/v2/project.ts homes). A house meets the head of the fire on a small share of its sides
+ * and slower, lower fire on the rest; timber beside it goes on burning for several steps, grass is
+ * gone in one.
+ */
+const HEAD_SHARE = 0.13,
+  FLANK_RATE = 0.4,
+  EXPOSURES_GRASS = 1.4,
+  EXPOSURES_TIMBER = 3.6;
 const fuelScratch: CellFuel = { fine: 0, grassShare: 0, ladder: 0, canopy: 0, heavy: 0, green: 0 };
 
 /** Beyond this many hours a cell is not part of any town's fireshed. */
@@ -477,6 +485,8 @@ export function computeFireshed(w: World, cases: DesignCase[] = designCases(w)):
   const town = new Int8Array(N).fill(-1);
   const behaviour = new Uint8Array(N);
   const flame = new Float32Array(N);
+  /** flame length where the same fire comes past on a flank */
+  const flank = new Float32Array(N);
 
   // targets: fuel-bearing ground beside a house
   const targets: Array<[number, number]> = [];
@@ -514,6 +524,8 @@ export function computeFireshed(w: World, cases: DesignCase[] = designCases(w)):
       const bh = arrivalBehaviour(f.load[n], f.canopy[n], f.i0[n], f.head[n], 0);
       dFlame[n] = Math.max(1e-3, bh.flame);
       dCrown[n] = bh.crown ? 1 : 0;
+      const fl = arrivalBehaviour(f.load[n], f.canopy[n], f.i0[n], f.head[n] * FLANK_RATE, 0).flame;
+      if (fl > flank[n]) flank[n] = fl;
     };
     const hc = new Float32Array(N).fill(Infinity);
     heap.clear();
@@ -632,10 +644,9 @@ export function computeFireshed(w: World, cases: DesignCase[] = designCases(w)):
       if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
       const n = ny * W + nx;
       if (!(flame[n] > 0) || L.town[n] !== 0) continue;
-      // a front passing a house exposes it from each burning side for a step or two (the exponent
-      // is fitted to what the simulation takes: scripts/v2/project.ts homes)
-      const p = structureExposure(flame[n], cellFuel(w, n, fuelScratch, DESIGN_GREEN).grassShare) * (1 - 0.75 * fw);
-      safe *= Math.pow(1 - p, EXPOSURES_PER_SIDE);
+      const g = cellFuel(w, n, fuelScratch, DESIGN_GREEN).grassShare;
+      const p = (HEAD_SHARE * structureExposure(flame[n], g) + (1 - HEAD_SHARE) * structureExposure(flank[n], g)) * (1 - 0.75 * fw);
+      safe *= Math.pow(1 - p, EXPOSURES_GRASS * g + EXPOSURES_TIMBER * (1 - g));
     }
     te.exposed += 1 - safe;
   }

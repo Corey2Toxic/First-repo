@@ -121,9 +121,19 @@ export function surfaceFlameLength(I: number): number {
 export function crownFlameLength(I: number): number {
   return 0.0266 * Math.pow(Math.max(0, I), 2 / 3);
 }
-/** Canopy base height (m) implied by ladder-fuel continuity: ~9 m in open old pine, about half a metre in a thicket. */
+/**
+ * Canopy base height (m) implied by ladder-fuel continuity: ~9.5 m in open old pine, a metre and a
+ * half in a thicket (dense poles shed their lowest branches; published values for untreated mixed
+ * conifer run 1-3 m). The first 2.0 builds let it fall to 0.5 m, at which Van Wagner's threshold is
+ * a 50 cm flame: 81-88 % of a Tinderbox valley's woods torched in a 3 m/s wind at 10 % fuel
+ * moisture, and half of a First Season valley's. With no edge a crew could face in any weather, a
+ * fire that escaped took the valley (verification seeds: a year with over 40 % burned in 5 of 8
+ * passive Tinderbox tenures). Now about half of a Tinderbox torches in a light wind when it is dry
+ * and nearly all of it in a strong one; a First Season valley torches in wind events.
+ */
+export const CBH_MIN = 1.5;
 export function canopyBaseHeight(ladder: number): number {
-  return 0.5 + 9 * Math.pow(1 - clamp01(ladder), 3);
+  return CBH_MIN + (9.5 - CBH_MIN) * Math.pow(1 - clamp01(ladder), 3);
 }
 /** Van Wagner's (1977) critical surface intensity (kW/m) for crown-fire initiation. */
 export function crownInitiationIntensity(cbh: number, foliarMoisturePct: number): number {

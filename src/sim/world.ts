@@ -304,6 +304,9 @@ export interface WorldMemory {
     /** `now` at the end of each year, oldest first */
     history: number[];
   };
+  /** v2: last day emergency fire spending hit the credit limit, and the year the warden was last told */
+  stateCarriedDay?: number;
+  stateCarriedYear?: number;
   /** v2: day the season's fire outlook was last given, and the last day a fire-weather watch was issued for */
   outlookYear?: number;
   watchDay?: number;

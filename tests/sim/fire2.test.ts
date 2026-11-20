@@ -10,6 +10,7 @@ import {
   KNOCKED_DOWN,
   applyFireEffects,
   byramIntensity,
+  CBH_MIN,
   canopyBaseHeight,
   crownInitiationIntensity,
   currentSpreadEnv,
@@ -122,7 +123,9 @@ describe('fire core v2: physical intensity', () => {
     expect(crownInitiationIntensity(6, 100)).toBeGreaterThan(2200);
     // ladder fuels lower the crown base from ~9 m to about half a metre
     expect(canopyBaseHeight(0)).toBeGreaterThan(8);
-    expect(canopyBaseHeight(0.9)).toBeLessThan(0.8);
+    // a thicket: about a metre and a half (the first 2.0 builds: 0.5 m, a threshold any flame met)
+    expect(canopyBaseHeight(0.9)).toBeLessThan(1.6);
+    expect(canopyBaseHeight(1)).toBe(CBH_MIN);
     expect(FLAME_LIMIT.hand).toBeLessThan(FLAME_LIMIT.engine);
   });
 

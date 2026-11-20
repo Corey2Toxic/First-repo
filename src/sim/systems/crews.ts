@@ -560,7 +560,9 @@ export interface CrewHooks {
   onBurnIgnited?: (pr: Project, fe: FireEvent) => void;
   onAidRequested?: (team: AidTeam, fe: FireEvent) => void;
   onAidArrived?: (team: AidTeam, fe: FireEvent) => void;
-  onAidReleased?: (team: AidTeam, fe: FireEvent | undefined, unpaid?: boolean) => void;
+  onAidReleased?: (team: AidTeam, fe: FireEvent | undefined) => void;
+  /** emergency fire spending has reached the credit limit: the state carries the fires from here */
+  onStateCarries?: () => void;
 }
 
 /**
@@ -618,14 +620,27 @@ export function crewsSubstep(w: World, hooks: CrewHooks = {}): void {
   }
 }
 
+/**
+ * Charge emergency fire spending to the service, as far as its emergency credit goes; past that the
+ * state carries it. Returns what the service paid. (2.0's first builds charged without limit, then
+ * sent outside teams home at the limit: a passive warden went bankrupt in year 13 on a standing
+ * order, a steward in year 1 on one summer's fires, and sending the team home lost the towns.)
+ */
+export function spendEmergency(w: World, category: string, amount: number): number {
+  const room = w.economy.funds + EMERGENCY_CREDIT;
+  const paid = Math.max(0, Math.min(amount, room));
+  if (paid > 0) w.spend(category, paid);
+  if (paid < amount) w.memory.stateCarriedDay = w.day;
+  return paid;
+}
+
 function chargeFire(w: World, fe: FireEvent | undefined, hours: number, kind: Crew['kind'], aid = false): void {
   if (aid) return; // an outside team is paid by the day (aidDaily)
   const rate = COST.suppressionHour * (kind === 'heli' ? 3.5 : kind === 'engine' ? 1.2 : 1);
   // A major incident is a declared emergency: the state pays three quarters of the overtime (as fire
   // management assistance does). Without it one bad summer cost a valley its whole allocation, and
   // the warden who had spent the reserve on thinning went bankrupt for it (a verification run did).
-  const amt = rate * hours * ((fe?.stage ?? 0) >= 2 ? MAJOR_INCIDENT_SHARE : 1);
-  w.spend('Suppression', amt);
+  const amt = spendEmergency(w, 'Suppression', rate * hours * ((fe?.stage ?? 0) >= 2 ? MAJOR_INCIDENT_SHARE : 1));
   if (fe) fe.cost += amt;
 }
 
@@ -1002,8 +1017,9 @@ export function requestAid(w: World, fe: FireEvent, auto = false): AidTeam {
   const stretched = droughtSeverity(w.climate.droughtIndex) > 0.75 ? 1 : 0;
   const team: AidTeam = { fireId: fe.id, requestedDay: w.day, arriveDay: w.day + (w.sub <= 5 ? 1 : 2) + stretched, arrived: false, released: false, releasedDay: -1, crewIds: [], cost: COST.aidMobilize, auto };
   w.aid.push(team);
-  w.spend('Mutual aid', COST.aidMobilize);
-  fe.cost += COST.aidMobilize;
+  const paid = spendEmergency(w, 'Mutual aid', COST.aidMobilize);
+  team.cost = paid;
+  fe.cost += paid;
   return team;
 }
 
@@ -1063,23 +1079,17 @@ function aidDaily(w: World, hooks: CrewHooks): void {
       if (hooks.onAidArrived) hooks.onAidArrived(team, fe);
     }
     if (team.arrived) {
-      // the county pays emergency bills only so far into the red: then the team goes home
-      // (v2's first builds had no limit, and a standing order could bankrupt a warden in one summer)
-      if (w.economy.funds - COST.aidPerDay < -EMERGENCY_CREDIT) {
-        releaseAid(w, team);
-        if (hooks.onAidReleased) hooks.onAidReleased(team, fe, true);
-        continue;
-      }
-      w.spend('Mutual aid', COST.aidPerDay);
-      team.cost += COST.aidPerDay;
-      fe.cost += COST.aidPerDay;
+      // the valley's share of the team's day, as far as its emergency credit goes (the team stays)
+      const paid = spendEmergency(w, 'Mutual aid', COST.aidPerDay);
+      team.cost += paid;
+      fe.cost += paid;
     }
   }
   if (w.policies.mutualAid === 'auto') {
     for (const fe of w.fires) {
       if (!fe.active || aidProblem(w, fe)) continue;
-      // a standing order never spends the service into debt: below a week's bills in hand, the warden decides
-      if (w.economy.funds < COST.aidMobilize + 5 * COST.aidPerDay) continue;
+      // a standing order does not take the service into debt: with nothing in hand, the warden decides
+      if (w.economy.funds < COST.aidMobilize) continue;
       if (autoAidWanted(w, fe, edges.get(fe.id)?.open ?? 0)) {
         const team = requestAid(w, fe, true);
         if (hooks.onAidRequested) hooks.onAidRequested(team, fe);
@@ -1090,6 +1100,11 @@ function aidDaily(w: World, hooks: CrewHooks): void {
 
 /** Daily bookkeeping: dispatch, recall crews from finished fires, project assignment. */
 export function crewsDaily(w: World, hooks: CrewHooks = {}): void {
+  // told once a year, the morning after it first happens
+  if (w.memory.stateCarriedDay === w.day - 1 && w.memory.stateCarriedYear !== w.year) {
+    w.memory.stateCarriedYear = w.year;
+    if (hooks.onStateCarries) hooks.onStateCarries();
+  }
   aidDaily(w, hooks);
   releaseFromContainedFires(w);
   autoDispatch(w);

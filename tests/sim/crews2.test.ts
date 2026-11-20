@@ -292,8 +292,13 @@ describe('mutual aid', () => {
     expect(applyCommand(w, { t: 'aid', fireId: fires[AID_MAX_TEAMS].id, on: true }).ok).toBe(false);
     // sending a team home frees it for another fire
     expect(applyCommand(w, { t: 'aid', fireId: fires[0].id, on: false }).ok).toBe(true);
+    // a call is never refused for want of money: past its emergency credit the state carries the team
     w.economy.funds = -EMERGENCY_CREDIT + 1000;
-    expect(applyCommand(w, { t: 'aid', fireId: fires[AID_MAX_TEAMS].id, on: true }).msg).toMatch(/credit/);
+    expect(applyCommand(w, { t: 'aid', fireId: fires[AID_MAX_TEAMS].id, on: true }).ok).toBe(true);
+    expect(w.economy.funds).toBe(-EMERGENCY_CREDIT);
+    // an air drop is the warden's choice and is refused at the limit
+    w.sub = 4;
+    expect(applyCommand(w, { t: 'airdrop', cells: [10 * w.W + 60] }).msg).toMatch(/credit/);
     // a fire takes one team until it is a very large one; then a second, and no third
     const big = standWithCrews(1);
     big.policies.mutualAid = 'manual';

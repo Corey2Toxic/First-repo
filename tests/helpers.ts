@@ -42,7 +42,8 @@ export function flatWorld(w = 60, h = 40, opts: FlatOpts = {}): World {
     L.shrub[i] = opts.shrub ?? (opts.ladder ? 0.4 : 0.05);
     L.aspen[i] = opts.aspen ?? 0;
     L.ageA[i] = 60;
-    L.under[i] = opts.under ?? 0;
+    // (v2: a stand with ladder fuels has an understory; young fir and brush alone leave the crown base high)
+    L.under[i] = opts.under ?? (opts.ladder ? 0.6 : 0);
     L.litter[i] = opts.litter ?? 3;
     L.dead[i] = opts.dead ?? 5;
     L.fm[i] = opts.fm ?? 0.06;

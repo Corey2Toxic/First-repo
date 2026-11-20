@@ -256,7 +256,8 @@ function apply(w: World, cmd: Command): CommandResult {
         if (!sent) return fail('No team is assigned to that fire.');
         return { ok: true, msg: (sent > 1 ? 'The incident teams have' : 'The incident team has') + ' been sent home' + (fe ? ' from the ' + fe.name : '') + '.' };
       }
-      const problem = aidProblem(w, fe) || emergencyFundsProblem(w, COST.aidMobilize);
+      // (never refused for want of money: past the emergency credit the state carries the team)
+      const problem = aidProblem(w, fe);
       if (problem || !fe) return fail(problem || 'That fire is out.');
       const team = requestAid(w, fe);
       const wait = team.arriveDay - w.day;

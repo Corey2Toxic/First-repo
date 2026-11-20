@@ -119,13 +119,15 @@ export function makeEventHooks(w: World): SimHooks {
       discover(w, 'mutual-aid');
       w.notify('The incident team has arrived for the ' + fe.name + ': four hand crews, two engines and a helicopter.', 'good', fe.originX, fe.originY, fe.id);
     },
-    onAidReleased(team, fe, unpaid) {
+    onStateCarries() {
+      w.notify('The service has used up its emergency credit. The state is carrying the cost of the fires from here; the debt is yours to answer for at the review.', 'warn', undefined, undefined, undefined, 1);
+    },
+    onAidReleased(team, fe) {
       const days = Math.max(1, team.releasedDay - team.arriveDay);
       const name = fe ? fe.name : 'fire';
       const span = days + (days > 1 ? ' days' : ' day');
       const bill = '$' + Math.round(team.cost / 1000) + 'k';
-      if (unpaid) w.notify('The county will not extend more emergency credit: the incident team has been sent home from the ' + name + ' after ' + span + ' (' + bill + ').', 'danger', fe?.originX, fe?.originY, fe?.id, 2);
-      else w.notify('The incident team has left the ' + name + ' after ' + span + ': ' + bill + '.', 'info');
+      w.notify('The incident team has left the ' + name + ' after ' + span + ': ' + bill + '.', 'info');
       if (fe) w.record('fire', 'An outside incident team worked the ' + name + ' for ' + span + ', at a cost of ' + bill + '.', 2, fe.originX, fe.originY);
     },
     onEscape(fe: FireEvent) {
