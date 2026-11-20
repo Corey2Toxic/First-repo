@@ -81,12 +81,14 @@ length in metres** (Byram 1959 for surface fire, Thomas 1963 for crown fire). Co
 | Consumer | Rule |
 |---|---|
 | Crews | direct attack by hand to 1.2 m, by engines to 2.4 m, from the air to 3.4 m (Andrews & Rothermel 1982) |
-| Crowning | Van Wagner (1977): surface intensity ≥ critical intensity for the canopy base height implied by ladder fuels and foliar moisture; a crown *run* needs a dense canopy (≥ 0.45) and wind |
+| Crowning | Van Wagner (1977): surface intensity ≥ critical intensity for the canopy base height implied by ladder fuels and foliar moisture; a crown *run* needs his second criterion as well, a rate of spread high enough for the canopy's bulk density (the first build used a canopy threshold of 0.45: see the report) |
 | Severity | crown fire: high; flames ≥ 1.5 m (discounted in grass, which passes in seconds): moderate; otherwise low |
 | Embers, houses, smoke | scale with the flames actually present |
 
-Because the rate on the flanks and the rear of a wind ellipse is a small fraction of the head rate,
-flanks are cool and workable and the head is not: "anchor and flank" emerges from the model.
+Because the rate at the rear of a wind ellipse is a small fraction of the head rate, the heel of a
+fire is cool and workable and its head is not. (As built, flanks are only a little cooler than the
+head while they still have unburned fuel downwind of them: `FIRE_MODEL.md` 2.2 has the measured
+flame lengths.)
 
 ### 3.3 The front, the holdover and the night
 
@@ -111,8 +113,10 @@ ends fires.
 
 ### 3.5 Target regime
 
-Passive default management, medium valley (~41,000 ha), 25 years. These are design targets; the
-development report gives what was achieved.
+Passive default management, medium valley (~41,000 ha), 25 years. These were the design targets
+set before the fire core was rebuilt; the development report gives what was achieved, and where the
+target itself turned out to be the wrong one (initial-attack success is a result of the warden's
+roster, lookouts and roads, so a passive warden catching 60–67 % was accepted).
 
 | | First Season | The Tinderbox |
 |---|---|---|
@@ -184,3 +188,23 @@ development report gives what was achieved.
 Saves: the layer list is append-only and 2.0 adds layers, so 1.x saves load; because the fire model
 and its units changed, a 1.x game continues under 2.0 rules from the day it is loaded (documented
 in the report).
+
+
+## 9. Status at release
+
+Built as designed: sections 3 (fire), the forecast, projection and fireshed of section 4, the
+after-action report, mutual aid, exposure read by the council and the score, treatments that do
+what they say, the retuned clock with "Next", per-scenario objectives (added to the design during
+development: each valley's council gives its warden three charges).
+
+Built differently:
+
+- *Morning briefings* are notices in the feed with the day's projection, not a modal with orders.
+  Orders are given from the fire's card and with the map tools, as before.
+- *The season briefing* is an outlook notice in mid-spring, when the snowpack is known.
+- *The clock* slows or pauses on notices the simulation flags; "a burn ready to light" does not stop
+  it (burns light themselves on a go day).
+
+Not built: the response-time map; a display of crew-days available against crew-days queued;
+control lines to burn out from (crews still only cut line and mop up); a recommended response on
+the fire report. The reasons and the rest of what is missing are in `V2_REPORT.md`, section 8.

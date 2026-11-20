@@ -158,10 +158,10 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
     applyCommand(w, { t: 'policy', key: 'mutualAid', value: 'manual' });
   }
   const exposure0 = w.memory.exposure?.start ?? 0;
-  const fires: Array<{ area: number; days: number; homes: number }> = [];
+  const fires: Array<{ area: number; days: number; homes: number; monitored: boolean }> = [];
   sim.hooks.onEnd = ((prev) => (fe) => {
     if (prev) prev(fe);
-    if (fe.cause !== 'prescribed' && fe.cause !== 'pile') fires.push({ area: fe.area, days: fe.outDay - fe.startDay, homes: fe.structuresLost });
+    if (fe.cause !== 'prescribed' && fe.cause !== 'pile') fires.push({ area: fe.area, days: fe.outDay - fe.startDay, homes: fe.structuresLost, monitored: fe.response === 'monitor' });
     // FW_FIRES=1: list the fires that mattered (stderr)
     if (process.env.FW_FIRES && (fe.area >= 300 || fe.structuresLost > 0))
       console.error(
@@ -196,8 +196,7 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
   for (let i = 0; i < w.N; i++) if (w.L.water[i] < 2) land++;
   const ex = w.memory.exposure;
   const obj = objectives(w);
-  const n = Math.max(1, fires.length);
-  const yrs = Math.max(1, Math.floor(w.yearsElapsed));
+    const yrs = Math.max(1, Math.floor(w.yearsElapsed));
   return {
     scen,
     seed,
@@ -209,7 +208,10 @@ function play(scen: ScenarioId, seed: string, strat: Strategy, years: number) {
     burnedPctYr: +((100 * burned) / yrs / land).toFixed(2),
     worstYearPct: +((100 * Math.max(0, ...w.stats.burned)) / land).toFixed(1),
     severePct: burned ? Math.round((100 * w.counters.totalHighSeverity) / burned) : 0,
-    caughtPct: Math.round((100 * fires.filter((f) => f.area < 10).length) / n),
+    // of the fires that were fought (a fire left to burn on purpose is not a failed attack)
+    caughtPct: Math.round((100 * fires.filter((f) => !f.monitored && f.area < 10).length) / Math.max(1, fires.filter((f) => !f.monitored).length)),
+    monitored: fires.filter((f) => f.monitored).length,
+    monitoredHa: fires.filter((f) => f.monitored).reduce((a, f) => a + f.area, 0),
     fires: fires.length,
     big: fires.filter((f) => f.area >= 1000).length,
     rxHa: w.counters.totalRx,
@@ -262,6 +264,7 @@ if (args[0] === '--one') {
     ['charges', 'charges'],
     ['homes lost', 'homesLost'],
     ['caught <10ha %', 'caughtPct'],
+    ['left to burn', 'monitored'],
     ['fires >=1k ha', 'big'],
     ['burned %/yr', 'burnedPctYr'],
     ['worst year %', 'worstYearPct'],

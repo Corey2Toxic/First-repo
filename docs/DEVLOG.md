@@ -19,6 +19,7 @@ log; the milestone table reflects the current state.
 | M9 | QA, e2e, performance, docs, final build | done |
 | M10 | v1.1: remediation of the independent audit (see `REMEDIATION_REPORT.md`) | done |
 | M11 | v1.1.1: stabilization after the regression verification (save/reload fix; open issues in `NEXT_PHASE.md`) | done |
+| M12 | v2.0: fires that last, seeing them coming, work that is named when it matters (see `V2_REPORT.md`) | done |
 
 ## Log
 
@@ -119,6 +120,68 @@ bumps the counter (and so also redraws rebuilt houses on the map at once). Lesso
 - The fire and ecology calibration work the verification recommends is listed, not attempted, in
   `NEXT_PHASE.md`.
 
+### 2.0 — "You cannot stop fire. You can only choose it."
+
+Full account: `V2_REPORT.md` (what was measured), `V2_DESIGN.md` (why), `FIRE_MODEL.md` (the model).
+Order of work, with what each step taught:
+
+1. **Evaluation before design.** Read the code and the earlier reports, then measured the inherited
+   game with new harnesses that run on any source tree. The finding that organised everything else:
+   spread progress was discarded at every 3-hour step, so slow fire could not exist and every fire
+   was over in a day. An attempt to study the whole codebase with a fan-out of thirteen agents ran
+   two at a time on this machine and lost eleven to a usage limit; three reports survived (fire,
+   crews, wildlife). Lesson: on a small machine, read it yourself and keep the measurements.
+2. **Fire core.** Progress kept between steps; Byram intensity with flame length in metres; fronts
+   that advance or hold; per-fuel moisture response; night recovery. First regime runs burned
+   50–90 % of a valley a year: the arithmetic mean of component rates lets a sixth of cured grass
+   carry a needle bed at three times its rate. Replaced by the share-weighted geometric mean.
+3. **A tinderbox that was not one.** A fuel census showed nothing in a generated Tinderbox valley
+   could torch at any wind. The missing state was the understory; added as a layer with growth,
+   fire and treatment effects, and reconstruction for old saves.
+4. **Crews and treatments.** Edge-based dispatch, re-prioritisation, night shift, outside incident
+   teams; a project planner that cannot deadlock; burns that carry and are billed for what burned;
+   thinning that opens the canopy. A crown run at first needed canopy cover over 0.45 and two wind
+   ramps: a thinned block still crowned over 80 % of its area. Replaced by Van Wagner's criterion
+   for active crown fire.
+5. **Seeing it coming.** Forecast from the weather that will actually come; projection and fireshed
+   from the simulation's own rate functions. The projection ran 6–12 % behind the simulated head
+   (a front is led by its fastest strands); a uniform 1.1 correction fixed the head and not the
+   area, so the lead is 1.1 at the head rising to 1.4 on the flanks.
+6. **Writing the projection tests found that the game's premise was false.** Exposure read zero
+   (a bug), and once fixed, comparing it with the simulation showed that a town a fire reached lost
+   11 of 12 homes whether or not the ground round it was thinned and burned. House ignition was
+   linear in flame length and capped; it is now steeply convex. Treated: 3 of 12; treated and
+   hardened: 1.
+7. **Initial attack.** A diagnostic of every fire's first hours showed fires of 50–190 ha at first
+   report on windy days, none caught at high danger: storm days forced a gale on the whole day, and
+   a new fire ran at full rate from its first minute. A build-up by fire size made slow fuels crawl
+   for days; it is by age (two steps) unless the fire is already 6 ha.
+8. **The loop.** Stages, morning briefings, fire-weather watches, after-action reports, yearly
+   exposure, objectives per scenario, tenures of 20–25 years.
+9. **Interface.** Forecast strip, incident card, projection on the map, Fireshed and Bad-day fire
+   lenses, reports, the charge, night.
+10. **Bots.** Four strategies on verification seeds. They found a standing order that bankrupted a
+    passive warden, a steward bankrupted by one summer's overtime, and Wilderness fires left to burn
+    in August. Fixed: aid stops at the credit limit; the state pays three quarters of a major
+    incident's overtime; Wilderness monitors only what starts on a mild day.
+11. **Wildlife.** Four measured defects fixed (forage accounting, kill ledger, lone wolf, hunting
+    revenue); the snowy-valley wolf question is recorded as open.
+
+Things worth knowing when changing this code:
+
+- Layers are append-only and keyed by name; 2.0 added `fprog`, `under`, `fstop`.
+- `fint` and `fpeak` are flame length in metres. Anything written for 1.x that compares them with
+  numbers around 1 is wrong now.
+- The projection must never draw from a random stream or write to the world; the test that guards
+  it compares state hashes.
+- Notifications are sim state (they consume ids and are saved). A briefing or a watch must be a pure
+  function of the world, or reloads will diverge. `scripts/qa/forkcheck.ts` is the gate.
+- Tests that measure steady spread call `established()` on their fire; without it they measure the
+  build-up.
+- Tuning seeds are `cal-*`; verification seeds are `ver-*`. Do not tune on the second set.
+- The safety checker of the development environment refuses shell heredocs that contain backticks
+  or `${`; patches with template literals go in a script file.
+
 ## Known limitations
 
 - **Software-rendered tests**: frame rate was only measured under SwiftShader (≈10 fps at 1440×900);
@@ -127,10 +190,11 @@ bumps the counter (and so also redraws rebuilt houses on the map at once). Lesso
 - **Balancing**: in v1.1 strategy bots show steward > grant-all > passive ≈ suppress > timber baron on
   the auditor's seeds, with the steward ahead on every paired seed; weather luck still swings
   individual tenures substantially, and the grade bands are a design calibration on six seeds.
-- **Fire intensity** is still a load-and-dryness proxy, not Byram intensity from the v1.1 rates, and
-  some valleys (Boomtown in particular) see decade-long surges of grass fire with heavy home losses
-  under default management (see `REMEDIATION_REPORT.md`).
-- **Crews** walk the fire perimeter greedily; they do not plan indirect attack lines or burnouts.
+- **2.0's own limitations** are listed in `V2_REPORT.md` (section 8): above all, nobody has played
+  it. The entries below date from 1.x; those that 2.0 changed say so.
+- **Fire intensity** is physical since 2.0 (Byram intensity, flame length in metres).
+- **Crews** walk the fire perimeter greedily; they do not plan indirect attack lines or burnouts
+  (still true in 2.0; the warden draws line and decides where).
 - **Smoke** is a 2D field with a simplified drift speed (kept on-map for legibility, not physical).
 - **Towns** are aggregates (population, homes), not individual agents.
 - **Hydrology** is daily and one-directional (no channel routing delays, no groundwater store beyond

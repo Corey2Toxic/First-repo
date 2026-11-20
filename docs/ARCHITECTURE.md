@@ -78,6 +78,32 @@ the v1.1 fire lab), so v1.1 uses Erlang(8) times on a 16-direction stencil (the 
 knight moves), which keep enough roughness to hide the stencil's polygonal bias while the front
 advances close to the specified rate in every wind direction. See `FIRE_MODEL.md`.
 
+## What 2.0 added
+
+| Module | Role |
+|---|---|
+| `sim/systems/fire.ts` | Spread progress kept between steps (`fprog`); Byram intensity and flame length; Van Wagner crowning; advancing and holding fronts; build-up of new fires; house ignition by flame length. Rate terms are exported (`cellTerms`, `surfaceRunRate`, `crownRunRate`, `arrivalBehaviour`) so that nothing else has to copy them. |
+| `sim/forecast.ts` | Weather has its own random stream, so the true weather of the coming days is generated on a shadow copy of the climate state and published through a noisy channel whose skill falls with lead time. No hidden second model of the weather. |
+| `sim/projection.ts` | `projectSpread` (forward) and `computeFireshed` (reverse): expected-travel-time searches over the spread stencil with the simulation's own rate terms. Pure: no random draws, no state change (tested with the state hash). `refreshExposure` stores the towns' design-day exposure in world memory once a year. |
+| `sim/incident.ts` | A fire's stage, the morning briefing, the fire-weather watch, the season outlook, and the after-action report built just before a finished fire's cells are released. |
+| `sim/objectives.ts` | Each scenario's three charges as pure readings of the world. |
+| `sim/systems/crews.ts`, `projects.ts` | Edge-based dispatch and re-prioritisation, outside incident teams, project planner without deadlock, burn go/no-go from the fire model and the forecast. |
+| `app/session.ts` | Caches the forecast (per day), the projection (per sub-step, throttled) and the firesheds (per month or when treatments change); slows or pauses on notifications the simulation flags (`Notification.stop`); "next event". |
+| `scripts/v2/*` | Measurement harnesses that load the simulation from any source tree (`FW_ROOT`), so every before/after figure in the reports can be re-run on the preserved 1.1.1 branch. |
+
+Design rules that held: the simulation stays DOM-free and deterministic; every new piece of state is
+either a layer (append-only, keyed by name) or JSON in the header; anything the interface shows
+about the future is computed from the simulation's own functions, never from a parallel model; a
+notification is the only way the simulation asks for the player's attention.
+
+Save format version 5: new layers `fprog`, `under`, `fstop`; new state `aid`, `reports`, and
+`memory.exposure`. Saves of versions 3 and 4 load: the understory is rebuilt from each cell's fire
+and treatment history, burning cells' intensity is converted to flame length, and the towns are
+surveyed when the warden resumes. `tests/sim/compat.test.ts` loads saves written by the untouched
+1.0 and 1.1.1 code. A 1.x game continues under 2.0's rules from the day it is loaded.
+
+Cost: a 24-hour projection of a real fire takes 3–26 ms; the firesheds of a medium valley 160–330 ms.
+
 ## Rendering
 
 - **MapRenderer** packs layers into a few low-resolution RGBA8 textures (terrain normal + elevation,
