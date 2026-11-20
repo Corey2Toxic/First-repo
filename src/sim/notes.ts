@@ -175,6 +175,56 @@ export const FIELD_NOTES: FieldNote[] = [
     body: 'A warm winter leaves little snowpack. Streams peak early, soils dry by midsummer, and the fire season starts weeks ahead of schedule.',
     tip: 'Watch the snowpack chart in spring: it predicts the summer.',
   },
+  // --- v2 ---
+  {
+    id: 'extended-attack',
+    title: 'The fire that got away',
+    category: 'Fire',
+    body: 'Most fires are caught small on the day they start. The ones that are not become campaigns of days or weeks. Nobody stops the head of such a fire while it is running: crews anchor at its heel and work up the flanks, and take the head when it lies down.',
+    tip: 'Read the morning briefing. Draw line where the projection says the fire will be tomorrow, not where it is now, and decide early which ground to give up.',
+  },
+  {
+    id: 'flame-length',
+    title: 'What a crew can face',
+    category: 'Fire',
+    body: 'Fire is fought by flame length. A hand crew can work an edge with flames up to about 1.2 m; engines to about 2.4 m; aircraft slow flames to about 3.4 m. Beyond that, and in any crown fire, nothing direct works. Flanks and the heel burn far lower than the head.',
+    tip: 'Select a fire to see how much of its edge each kind of crew can work. Ground you have thinned or burned is where the flames come back within reach.',
+  },
+  {
+    id: 'night-recovery',
+    title: 'Fire lies down at night',
+    category: 'Fire',
+    body: 'After dark the air cools and humidity recovers; fine fuels take up moisture and flames drop. A grass fire may go out by itself; a fire in heavy fuel holds over and wakes with the afternoon wind. In drought, and under a dry downslope wind, the night gives nothing back.',
+    tip: 'Night is when line holds. Crews work the night shift until they are spent, so the first night after a fire escapes matters most.',
+  },
+  {
+    id: 'understory',
+    title: 'The thicket',
+    category: 'Forest',
+    body: 'Where fire stays away, seedlings fill in beneath the big trees until the stand is a wall of saplings and poles. They lift fire from the ground into the crowns and make the litter beneath burn faster. A light fire kills most of them and spares the old trees.',
+    tip: 'The Fuel lens shows where the understory has closed in. Thinning and burning clear it; it is back in ten to fifteen years unless fire returns.',
+  },
+  {
+    id: 'fireshed',
+    title: 'The fireshed',
+    category: 'People',
+    body: 'Every town has a fireshed: the ground from which a fire on a bad day reaches its homes before the day is out. How many homes that fire then takes depends on what it finds at the fence: crown fire in a thicket takes nearly all of them, a ground fire in thinned and burned forest takes few.',
+    tip: 'The Fireshed lens shows the hours a fire would need. Work inward: the last few hundred metres decide whether homes burn, the ground beyond decides whether crews get a chance.',
+  },
+  {
+    id: 'mutual-aid',
+    title: 'Calling for help',
+    category: 'People',
+    body: 'When a fire outgrows the valley, an outside incident team can be called: four hand crews, two engines and a helicopter. It reports the morning after the call and bills by the day, and in a regional drought it is slower to come.',
+    tip: 'Call early or not at all: a team that arrives after the wind has dropped is money spent on mopping up. The standing order in Policies calls one automatically.',
+  },
+  {
+    id: 'treated-ground',
+    title: 'Where the fire dropped',
+    category: 'Fire',
+    body: 'A fire that ran through the crowns came down to the ground when it met forest you had thinned or burned. That is all fuel treatment does, and it is enough: it does not stop fire, it changes what kind of fire arrives.',
+    tip: 'After-action reports say how treated ground burned against the rest. Treatments that no crew stands on only change the severity; treatments with a crew on them stop fires.',
+  },
 ];
 
 export function discover(w: World, id: string): boolean {

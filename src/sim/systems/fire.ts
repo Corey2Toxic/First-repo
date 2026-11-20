@@ -186,6 +186,7 @@ export function igniteCell(w: World, i: number, fe: FireEvent, I: number, crown:
   L.fphase[i] = 0;
   L.crown[i] = crown ? 1 : 0;
   L.fprog[i] = 0;
+  L.fstop[i] = 0;
   const f = cellFuel(w, i, tmpFuel);
   L.ftime[i] = holdHours(w, i, f, crown);
   w.burning.push(i);
@@ -319,6 +320,8 @@ export interface FireStepHooks {
   onCrown?: (fe: FireEvent, cell: number) => void;
   onSpot?: (fe: FireEvent, cell: number, crossed: boolean) => void;
   onEscape?: (fe: FireEvent) => void;
+  /** the fire has gone out; its cells still carry its id (the moment to read its final edge) */
+  onEnding?: (fe: FireEvent) => void;
   onEnd?: (fe: FireEvent) => void;
 }
 
@@ -1188,6 +1191,8 @@ export function projectContains(w: World, projectId: number, cell: number): bool
 // ---------------------------------------------------------------- burnout
 /** Flames this long (m) scorch crowns and kill thin-barked trees: moderate severity. */
 export const SEVERITY_FLAME = 1.5;
+/** Ground counts as treated for this many years after a thinning, a fuel break or a burn (fire reports). */
+export const TREATED_YEARS = 12;
 function burnout(w: World, i: number, fe: FireEvent | undefined, hooks: FireStepHooks): void {
   const L = w.L;
   const crown = L.crown[i] !== 0;
@@ -1210,10 +1215,16 @@ function burnout(w: World, i: number, fe: FireEvent | undefined, hooks: FireStep
   const peak = L.fpeak[i] * (1 - 0.5 * cellFuel(w, i, tmpFuel).grassShare);
   const sev = crown ? 3 : peak >= SEVERITY_FLAME ? 2 : 1;
   L.fpeak[i] = 0;
+  // was this ground thinned, cleared or burned in the years before? (asked before the burn is recorded)
+  const prepared = w.yearF - L.lastTreat[i] < TREATED_YEARS || w.yearF - L.lastBurn[i] < TREATED_YEARS;
   applyFireEffects(w, i, sev);
   if (fe) {
     if (sev === 3) fe.highSeverity++;
     else if (sev === 1) fe.lowSeverity++;
+    if (prepared) {
+      fe.treatedArea = (fe.treatedArea ?? 0) + 1;
+      if (sev === 3) fe.treatedHigh = (fe.treatedHigh ?? 0) + 1;
+    }
   }
   if (!fe) {
     L.fire[i] = FIRE.NONE;
@@ -1309,6 +1320,7 @@ function updateFireEvents(w: World, hooks: FireStepHooks): void {
       fe.outDay = w.day;
       recordFireEnd(w, fe);
       pruned = true;
+      if (hooks.onEnding) hooks.onEnding(fe);
       // release burnt cells
       for (let y = fe.minY; y <= fe.maxY; y++)
         for (let x = fe.minX; x <= fe.maxX; x++) {
@@ -1316,6 +1328,7 @@ function updateFireEvents(w: World, hooks: FireStepHooks): void {
           if (L.fid[i] === fe.id) {
             if (L.fire[i] === FIRE.BURNT) L.fire[i] = FIRE.NONE;
             L.fid[i] = -1;
+            L.fstop[i] = 0;
           }
         }
       if (hooks.onEnd) hooks.onEnd(fe);

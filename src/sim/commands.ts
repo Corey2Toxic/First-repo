@@ -6,7 +6,7 @@
 import { astar } from './grid.ts';
 import { FIRE, INFRA, SP, ZONE } from './types.ts';
 import type { CrewKind, FireResponse, Policies, ProjectKind } from './types.ts';
-import { COST, CREW_COST } from './economyParams.ts';
+import { COST, CREW_COST, EMERGENCY_CREDIT } from './economyParams.ts';
 import { MAX_BURN_UNIT, cancelProject, createProjects, zoneConflict } from './systems/projects.ts';
 import { aidFor, aidProblem, assignToFire, crewCell, fireById, planPath, releaseAid, releaseProject, requestAid } from './systems/crews.ts';
 import { makeCrew } from './gen/crews.ts';
@@ -54,8 +54,7 @@ const fail = (msg: string): CommandResult => ({ ok: false, msg });
 /** The air tanker: loads it can fly in a day, and the wind (m/s) above which it stays on the ground. */
 export const TANKER_LOADS_PER_DAY = 6;
 export const TANKER_MAX_WIND = 13;
-/** How far into debt emergency fire spending may take the service before the county stops paying. */
-export const EMERGENCY_CREDIT = 400_000;
+export { EMERGENCY_CREDIT };
 
 /**
  * Planned spending needs the money in hand. v1.x checked funds nowhere: towers, crews and wolves

@@ -1,6 +1,10 @@
 /**
- * Scenario presets. Each is just a set of initial conditions and pressures —
- * the simulation rules are identical across scenarios.
+ * Scenario presets. Each is a set of initial conditions and pressures, and a charge from the council
+ * (objectives.ts); the simulation rules are identical across scenarios.
+ *
+ * Tenures are 20-25 years (v1.x: 30-50). Fires are now incidents of days that ask for decisions, a
+ * year takes longer to play, and twenty years is long enough to see a thinned stand close in again
+ * and a burn scar turn to aspen; the sandbox continues after the legacy report for those who want more.
  */
 import type { GameConfig, ScenarioId } from './world.ts';
 
@@ -19,10 +23,10 @@ export const SCENARIOS: ScenarioInfo[] = [
     title: 'First Season',
     tagline: 'Learn the valley. A guided first year, a forgiving climate.',
     description:
-      'A healthy, patchy forest shaped by generations of natural fire. Wolves and beavers are present, the council is patient, and an advisor walks you through your first fire season. Thirty years to make your mark.',
+      'A healthy, patchy forest shaped by generations of natural fire. Wolves and beavers are present, the council is patient, and an advisor walks you through your first fire season. Twenty years to make your mark.',
     difficulty: 1,
     config: {
-      tenureYears: 30,
+      tenureYears: 20,
       difficulty: 'gentle',
       climateTrend: 0,
       dryness: 1.05,
@@ -43,7 +47,7 @@ export const SCENARIOS: ScenarioInfo[] = [
       'For a hundred years every fire was suppressed. Fir has crowded into the pine, litter lies ankle-deep, and the summers are getting hotter. Can you bring fire back on your own terms before it returns on its own?',
     difficulty: 3,
     config: {
-      tenureYears: 50,
+      tenureYears: 25,
       difficulty: 'standard',
       climateTrend: 0.3,
       dryness: 0.92,
@@ -64,7 +68,7 @@ export const SCENARIOS: ScenarioInfo[] = [
       'A vast burn scar of standing dead timber. Hillsides that will shed soil in the first heavy storm, a reservoir downstream, a mill that wants to salvage, and a forest that knows how to come back — if you let it.',
     difficulty: 2,
     config: {
-      tenureYears: 40,
+      tenureYears: 20,
       difficulty: 'standard',
       climateTrend: 0.2,
       dryness: 1.0,
@@ -85,7 +89,7 @@ export const SCENARIOS: ScenarioInfo[] = [
       'The valley is booming. New houses push into the forest every year, the mill is hungry, and visitors pour in each summer. Growth pays the bills — and puts more lives in the path of the next fire.',
     difficulty: 3,
     config: {
-      tenureYears: 50,
+      tenureYears: 25,
       difficulty: 'standard',
       climateTrend: 0.25,
       dryness: 0.97,
@@ -106,7 +110,7 @@ export const SCENARIOS: ScenarioInfo[] = [
       'With predators gone, deer browse every aspen shoot and willow sprout. The groves are old and not replacing themselves; the streams run straight and fast. Ranchers like it this way. The ecosystem does not.',
     difficulty: 2,
     config: {
-      tenureYears: 50,
+      tenureYears: 25,
       difficulty: 'standard',
       climateTrend: 0.2,
       dryness: 1.0,
@@ -126,7 +130,7 @@ export const SCENARIOS: ScenarioInfo[] = [
     description: 'Tune the climate, history, wildlife and budget, then see what kind of valley emerges.',
     difficulty: 2,
     config: {
-      tenureYears: 50,
+      tenureYears: 25,
       difficulty: 'standard',
       climateTrend: 0.2,
       dryness: 1.0,

@@ -19,7 +19,12 @@ import type { LayerName, LayerType } from './world.ts';
  * versions get their defaults instead of `undefined`; invalid policies reset; orphaned fire cells
  * released. Version 3 (v1.0) saves load unchanged otherwise.
  */
-export const SAVE_VERSION = 4;
+/**
+ * 5 (v2.0): fire behaviour in physical units (flame length in `fint`/`fpeak`), spread progress,
+ * understory, who put a cell out, outside teams and after-action reports. Saves of versions 3 and 4
+ * load: what they lack is rebuilt from what they hold (see decodeWorld).
+ */
+export const SAVE_VERSION = 5;
 
 const STATE_KEYS = [
   'day',
@@ -62,6 +67,7 @@ const STATE_KEYS = [
   'commandLog',
   // v2
   'aid',
+  'reports',
 ] as const;
 
 /** Object-valued state merged over the defaults of a fresh World on load. */
@@ -155,7 +161,14 @@ export function decodeWorld(bytes: Uint8Array): World {
     seedBeetles(w); // and no endemic beetle population
   }
   // saves from before v2 have no understory layer: reconstruct it from each cell's fire and treatment history
-  if (!header.layers.some((l) => l.name === 'under')) initUnderstory(w);
+  if (!header.layers.some((l) => l.name === 'under')) {
+    initUnderstory(w);
+    // and their burning cells hold v1.x's intensity proxy (0..~2), where v2 keeps flame length in metres
+    for (const b of w.burning) {
+      w.L.fint[b] = Math.min(8, w.L.fint[b] * 2);
+      w.L.fpeak[b] = Math.min(8, w.L.fpeak[b] * 2);
+    }
+  }
   // v1.0 saves can hold burned houses that were never released (fireproof forever): repair them
   releaseOrphanFireCells(w);
   // v1.0 did not count homes buried by debris flows in the valley total; every lost home is in

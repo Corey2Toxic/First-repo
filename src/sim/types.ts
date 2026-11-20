@@ -86,6 +86,54 @@ export interface FireEvent {
   spotFires: number;
   /** Has burned into a Community Buffer (always fought, dispatched first). */
   inBuffer?: boolean;
+  // --- v2: the incident's record (see incident.ts) ---
+  /** highest stage reached: 0 initial attack, 1 extended attack, 2 major incident */
+  stage?: 0 | 1 | 2;
+  /** most crews assigned at once */
+  peakCrews?: number;
+  /** burning cells put out by crews, engines and water drops */
+  knocked?: number;
+  /** area burned on ground thinned, cleared or burned in the years before, and how much of that severely */
+  treatedArea?: number;
+  treatedHigh?: number;
+  /** area a day ago and the day that was noted (for growth per day) */
+  areaYesterday?: number;
+}
+
+/** Why a fire is not in a piece of ground beside its final edge. */
+export type StopCause = 'water' | 'road' | 'fuelbreak' | 'line' | 'scar' | 'treated' | 'bare' | 'green' | 'crews' | 'weather';
+
+/** The after-action report of a fire that has gone out (incident.ts). */
+export interface FireReport {
+  fireId: number;
+  name: string;
+  cause: FireCause;
+  startDay: number;
+  outDay: number;
+  x: number;
+  y: number;
+  area: number;
+  high: number;
+  low: number;
+  crown: number;
+  /** longest flames recorded, m */
+  peakFlame: number;
+  /** homes the fire burned up to, and those it took */
+  homesReached: number;
+  homesLost: number;
+  /** suppression cost, and the outside team's bill */
+  cost: number;
+  aidCost: number;
+  stage: 0 | 1 | 2;
+  peakCrews: number;
+  knocked: number;
+  /** what holds its final edge: cause and share of the edge, largest first */
+  stopped: Array<[StopCause, number]>;
+  treatedArea: number;
+  treatedHigh: number;
+  untreatedHigh: number;
+  /** the account, a few sentences */
+  text: string[];
 }
 
 export type CrewKind = 'hand' | 'engine' | 'heli';
@@ -347,6 +395,8 @@ export interface Notification {
   x?: number;
   y?: number;
   fireId?: number;
+  /** v2: worth interrupting fast time for: 1 slow down, 2 pause */
+  stop?: 1 | 2;
 }
 
 export interface LedgerYear {

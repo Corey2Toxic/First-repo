@@ -10,7 +10,7 @@
 import { DX8, DY8, astar, clamp01 } from '../grid.ts';
 import { FIRE, INFRA, SUBSTEPS_PER_DAY } from '../types.ts';
 import type { AidTeam, Crew, FireEvent, Project } from '../types.ts';
-import { COST, WORK } from '../economyParams.ts';
+import { COST, EMERGENCY_CREDIT, WORK } from '../economyParams.ts';
 import type { World } from '../world.ts';
 import { burnCrewsNeeded, burnOutlook, completeProjectCell, igniteProjectBurn, projectWorkCell } from './projects.ts';
 import { cellFuel } from './fuels.ts';
@@ -225,13 +225,16 @@ function nearestWater(w: World, x: number, y: number, maxR = 22): number {
   return best;
 }
 
-function extinguish(w: World, i: number): void {
+/** Put a burning cell out. `by`: 1 a hand crew, 2 an engine, 3 a water drop (kept for the fire's report). */
+function extinguish(w: World, i: number, fe: FireEvent | undefined, by: 1 | 2 | 3): void {
   // a burning house is beyond a hose line or a bucket: cutting its burn time would only bring its
   // loss forward (v1.0 did exactly that). Crews protect houses before they catch (structureProtection).
   if (w.L.town[i] > 0) return;
   // cut the remaining burn time: the cell burns out next step at its current severity
+  if (w.L.ftime[i] > 0.01 && fe) fe.knocked = (fe.knocked ?? 0) + 1;
   w.L.ftime[i] = Math.min(w.L.ftime[i], 0.01);
   w.L.fint[i] = Math.min(w.L.fint[i], 0.05);
+  w.L.fstop[i] = by;
 }
 
 export function fireThreat(w: World, fe: FireEvent): { town: number; dist: number } {
@@ -557,7 +560,7 @@ export interface CrewHooks {
   onBurnIgnited?: (pr: Project, fe: FireEvent) => void;
   onAidRequested?: (team: AidTeam, fe: FireEvent) => void;
   onAidArrived?: (team: AidTeam, fe: FireEvent) => void;
-  onAidReleased?: (team: AidTeam, fe: FireEvent | undefined) => void;
+  onAidReleased?: (team: AidTeam, fe: FireEvent | undefined, unpaid?: boolean) => void;
 }
 
 /**
@@ -685,7 +688,7 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
           }
         }
       if (best < 0) break;
-      extinguish(w, best);
+      extinguish(w, best, fe, 2);
       done++;
       budget -= attackEffort(w, best);
       // drive along the edge where the ground allows it
@@ -741,7 +744,7 @@ function suppressTick(w: World, c: Crew, day: boolean, hooks: CrewHooks): void {
       if (!w.inside(x, y)) continue;
       const i = y * w.W + x;
       if (L.fire[i] === FIRE.BURNING && L.fid[i] === fe.id && L.fint[i] < 0.6) {
-        extinguish(w, i);
+        extinguish(w, i, fe, 1);
         mop--;
       }
     }
@@ -806,7 +809,7 @@ function heliTick(w: World, c: Crew, fe: FireEvent, hours: number): void {
         const i = (by + dy) * w.W + bx + dx;
         L.wet[i] = Math.max(L.wet[i], 0.85);
         if (L.fire[i] === FIRE.BURNING) {
-          if (L.fint[i] < FLAME_LIMIT.engine && L.crown[i] !== 1) extinguish(w, i);
+          if (L.fint[i] < FLAME_LIMIT.engine && L.crown[i] !== 1) extinguish(w, i, fe, 3);
           else L.fint[i] *= 0.6;
         }
       }
@@ -1040,6 +1043,13 @@ function aidDaily(w: World, hooks: CrewHooks): void {
       if (hooks.onAidArrived) hooks.onAidArrived(team, fe);
     }
     if (team.arrived) {
+      // the county pays emergency bills only so far into the red: then the team goes home
+      // (v2's first builds had no limit, and a standing order could bankrupt a warden in one summer)
+      if (w.economy.funds - COST.aidPerDay < -EMERGENCY_CREDIT) {
+        releaseAid(w, team);
+        if (hooks.onAidReleased) hooks.onAidReleased(team, fe, true);
+        continue;
+      }
       w.spend('Mutual aid', COST.aidPerDay);
       team.cost += COST.aidPerDay;
       fe.cost += COST.aidPerDay;
@@ -1048,6 +1058,8 @@ function aidDaily(w: World, hooks: CrewHooks): void {
   if (w.policies.mutualAid === 'auto') {
     for (const fe of w.fires) {
       if (!fe.active || aidProblem(w, fe)) continue;
+      // a standing order never spends the service into debt: below a week's bills in hand, the warden decides
+      if (w.economy.funds < COST.aidMobilize + 5 * COST.aidPerDay) continue;
       if (autoAidWanted(w, fe, edges.get(fe.id)?.open ?? 0)) {
         const team = requestAid(w, fe, true);
         if (hooks.onAidRequested) hooks.onAidRequested(team, fe);

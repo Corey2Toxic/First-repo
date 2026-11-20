@@ -10,6 +10,7 @@ import { discover } from './notes.ts';
 import { shock } from './systems/council.ts';
 import { bloomFactor } from './derived.ts';
 import { deerCount } from './systems/wildlife.ts';
+import { STAGE_NAME, buildFireReport, fileFireReport } from './incident.ts';
 
 function nearestName(w: World, x: number, y: number): string {
   let best = '',
@@ -23,6 +24,9 @@ function nearestName(w: World, x: number, y: number): string {
   }
   return best;
 }
+
+/** Fires this large (ha) get their account in the "is out" notice; smaller ones just the size. */
+const ESCAPED_REPORT = 10;
 
 const CAUSE_TEXT: Record<string, string> = {
   lightning: 'lightning',
@@ -49,8 +53,28 @@ export function makeEventHooks(w: World): SimHooks {
     onDetect(fe: FireEvent) {
       const where = nearestName(w, fe.originX, fe.originY);
       const resp = fe.response === 'monitor' ? ' Wilderness policy: monitoring.' : '';
-      w.notify(`New ${CAUSE_TEXT[fe.cause] ?? ''} fire: the ${fe.name}, near ${where}, reported by ${fe.detectedBy}.${resp}`, 'danger', fe.originX, fe.originY, fe.id);
+      const size = fe.area >= 2 ? `, already ${fe.area} ha` : '';
+      w.notify(`New ${CAUSE_TEXT[fe.cause] ?? ''} fire: the ${fe.name}, near ${where}${size}, reported by ${fe.detectedBy}.${resp}`, 'danger', fe.originX, fe.originY, fe.id, 1);
       if (w.weather.dryLightning && fe.cause === 'lightning') discover(w, 'dry-lightning');
+    },
+    onStage(fe: FireEvent, stage) {
+      const x = Math.round((fe.minX + fe.maxX) / 2),
+        y = Math.round((fe.minY + fe.maxY) / 2);
+      if (stage === 1) {
+        w.notify(`The ${fe.name} has escaped initial attack: ${fe.area} ha and still moving. It is yours to manage now — draw line, call help, or decide what to give up.`, 'warn', x, y, fe.id, 2);
+        discover(w, 'extended-attack');
+      } else if (stage === 2) {
+        const why = fe.structuresLost > 0 ? 'homes are burning' : fe.inBuffer ? 'it is among the homes' : `${fe.area.toLocaleString('en-US')} ha`;
+        w.notify(`${STAGE_NAME[2]}: the ${fe.name} (${why}).`, 'danger', x, y, fe.id, 2);
+      }
+    },
+    onEnding(fe: FireEvent) {
+      if (fe.cause === 'prescribed' || fe.cause === 'pile') return;
+      if (!fe.detected && fe.area < 5) return;
+      const rep = buildFireReport(w, fe);
+      fileFireReport(w, rep);
+      const untreated = rep.area - rep.treatedArea;
+      if (rep.treatedArea >= 20 && untreated >= 20 && rep.untreatedHigh / untreated > 0.15 && rep.treatedHigh / rep.treatedArea < (0.5 * rep.untreatedHigh) / untreated) discover(w, 'treated-ground');
     },
     onCrown(fe: FireEvent, cell: number) {
       if (!fe.detected) return;
@@ -59,6 +83,7 @@ export function makeEventHooks(w: World): SimHooks {
         discover(w, 'crown-fire');
       }
       if (w.yearF - w.L.lastBurn[cell] > 80) discover(w, 'fire-paradox');
+      if (w.L.under[cell] > 0.5) discover(w, 'understory');
       if (w.weather.windEvent && once('wind' + w.day)) discover(w, 'downslope-wind');
     },
     onSpot(fe: FireEvent, cell: number, crossed: boolean) {
@@ -85,14 +110,16 @@ export function makeEventHooks(w: World): SimHooks {
       w.notify(who + ' outside incident team has been called to the ' + fe.name + '. It reports ' + when + '.', 'warn', fe.originX, fe.originY, fe.id);
     },
     onAidArrived(_team, fe) {
+      discover(w, 'mutual-aid');
       w.notify('The incident team has arrived for the ' + fe.name + ': four hand crews, two engines and a helicopter.', 'good', fe.originX, fe.originY, fe.id);
     },
-    onAidReleased(team, fe) {
+    onAidReleased(team, fe, unpaid) {
       const days = Math.max(1, team.releasedDay - team.arriveDay);
       const name = fe ? fe.name : 'fire';
       const span = days + (days > 1 ? ' days' : ' day');
       const bill = '$' + Math.round(team.cost / 1000) + 'k';
-      w.notify('The incident team has left the ' + name + ' after ' + span + ': ' + bill + '.', 'info');
+      if (unpaid) w.notify('The county will not extend more emergency credit: the incident team has been sent home from the ' + name + ' after ' + span + ' (' + bill + ').', 'danger', fe?.originX, fe?.originY, fe?.id, 2);
+      else w.notify('The incident team has left the ' + name + ' after ' + span + ': ' + bill + '.', 'info');
       if (fe) w.record('fire', 'An outside incident team worked the ' + name + ' for ' + span + ', at a cost of ' + bill + '.', 2, fe.originX, fe.originY);
     },
     onEscape(fe: FireEvent) {
@@ -131,7 +158,12 @@ export function makeEventHooks(w: World): SimHooks {
           shock(w, 'tourism', -6, 'A megafire');
         }
       }
-      if (fe.detected) w.notify(`The ${fe.name} is out after ${days} days: ${fe.area.toLocaleString()} ha.`, fe.structuresLost ? 'warn' : 'info', fe.originX, fe.originY);
+      // the after-action report (filed in onEnding) says what held it and whether prepared ground mattered
+      const rep = w.reports.length && w.reports[w.reports.length - 1].fireId === fe.id ? w.reports[w.reports.length - 1] : null;
+      if (fe.detected) {
+        const account = rep && rep.area >= ESCAPED_REPORT ? ' ' + rep.text.slice(1, 3).join(' ') : '';
+        w.notify(`The ${fe.name} is out after ${days} day${days === 1 ? '' : 's'}: ${fe.area.toLocaleString()} ha.${account}`, fe.structuresLost ? 'warn' : 'info', fe.originX, fe.originY, undefined, rep && rep.stage >= 1 ? 1 : undefined);
+      }
       // gentle fires in fire-adapted forest teach something
       if (fe.lowSeverity >= 30 && fe.detected) discover(w, 'pine-survives');
       // what stopped it? moist meadows, aspen and beaver ponds on the final perimeter
@@ -152,6 +184,7 @@ export function makeEventHooks(w: World): SimHooks {
       }
     },
     onCrewRetreat(c, fe) {
+      discover(w, 'flame-length');
       if (once('retreat' + fe.id)) w.notify(`${c.name} pulled back: the ${fe.name} is too hot to engage.`, 'warn', Math.floor(c.x), Math.floor(c.y), fe.id);
     },
     onBurnIgnited(pr, fe) {

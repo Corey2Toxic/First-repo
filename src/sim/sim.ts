@@ -25,8 +25,11 @@ import { applyAllocation, beginReview, councilMonthly } from './systems/council.
 import { makeEventHooks, monthlyDiscoveries } from './events.ts';
 import { homeHazard } from './score.ts';
 import { discover } from './notes.ts';
+import { fireWeatherWatch, morningBriefings, seasonBriefing, updateIncidents } from './incident.ts';
+import type { IncidentHooks } from './incident.ts';
+import { refreshExposure } from './projection.ts';
 
-export interface SimHooks extends FireStepHooks, CrewHooks {
+export interface SimHooks extends FireStepHooks, CrewHooks, IncidentHooks {
   onNewDay?: (w: World) => void;
   onNewYear?: (w: World) => void;
   onIgnition?: (fe: FireEvent) => void;
@@ -79,6 +82,8 @@ export class Simulation {
     }
     // saves from before v1.1 have no near-home baseline: take it when the game is resumed
     if (w.memory.startHomeHazard === undefined) w.memory.startHomeHazard = homeHazard(w);
+    // v2: what a design-day fire would do to the towns as the warden finds them (older saves: as resumed)
+    if (w.memory.exposure === undefined) refreshExposure(w);
   }
 
   /** True when the simulation is waiting on the player (annual review, game over). */
@@ -106,7 +111,10 @@ export class Simulation {
     if (w.burning.length > 0) {
       fireSubstep(w, this.hooks);
       detectFires(w, this.hooks);
+      updateIncidents(w, this.hooks);
+      if (w.sub === 2) morningBriefings(w);
     }
+    if (w.sub === 6) fireWeatherWatch(w);
     crewsSubstep(w, this.hooks);
     holdBurns(w);
     if (w.smokePresent || w.burning.length > 0) smokeSubstep(w);
@@ -150,6 +158,7 @@ export class Simulation {
       monthlyDiscoveries(w);
       this.statsMonthly();
     }
+    seasonBriefing(w);
     wildlifeDaily(w, this.hooks);
     townsDaily(w);
     dailyEconomy(w);
@@ -230,6 +239,7 @@ export class Simulation {
     c.yearClosedDays = 0;
     w.memory.fireBanDays = 0;
     if (this.hooks.onNewYear) this.hooks.onNewYear(w);
+    refreshExposure(w, true);
     w.closingYear = false;
     beginReview(w, closedLedger);
   }

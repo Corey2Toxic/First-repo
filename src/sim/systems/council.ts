@@ -70,8 +70,13 @@ export function councilMonthly(w: World): void {
     const yrs = (w.day - (m.codeAdoptedDay ?? -9999)) / 360;
     T.residents.push(yrs < 3 ? ['Firewise retrofit costs', -5] : ['Feeling fire-safe', 3]);
   }
-  const fw = w.towns.length ? w.towns.reduce((s, t) => s + t.firewise, 0) / w.towns.length : 0;
-  if (fw > 0.45) T.residents.push(['Protected surroundings', (fw - 0.45) * 14]);
+  // v2: what residents feel is what a bad fire day would do to their homes, against how the warden
+  // found things (the fireshed's exposure; v1.x read the firewise rating alone)
+  const ex = m.exposure;
+  if (ex && ex.start > 0.01) {
+    const d = (ex.start - ex.now) / ex.start;
+    if (Math.abs(d) > 0.05) T.residents.push([d > 0 ? 'Homes better protected' : 'Homes more exposed to fire', clamp(d * 14, -8, 10)]);
+  }
   if (debt) T.residents.push(['Service in debt', -debt]);
   // timber
   const ratio = e.millOpen ? (e.harvestLastYear || e.millDemand * 0.8) / e.millDemand : 0;
@@ -363,11 +368,12 @@ const TEMPLATES: PetitionTemplate[] = [
     key: 'protect-homes',
     faction: 'residents',
     when: (w) => {
-      const worst = w.towns.reduce((a, t) => Math.max(a, 1 - t.firewise), 0);
-      return worst > 0.6 && (w.memory.nearTownFireDays > 0.5 || (w.memory.recentLoss ?? 0) > 0.5) ? 1 : worst > 0.75 ? 0.5 : 0;
+      // the town a bad fire day would hurt most (share of its homes; before v2: its firewise rating)
+      const worst = worstExposedTown(w).share;
+      return worst > 0.3 && (w.memory.nearTownFireDays > 0.5 || (w.memory.recentLoss ?? 0) > 0.5) ? 1 : worst > 0.5 ? 0.5 : 0;
     },
     make: (w) => {
-      const t = [...w.towns].sort((a, b) => a.firewise - b.firewise)[0];
+      const t = w.towns[worstExposedTown(w).id] ?? [...w.towns].sort((a, b) => a.firewise - b.firewise)[0];
       const cells = townBufferCells(w, t.id);
       return {
         title: `Protect ${t.name}`,
@@ -462,11 +468,38 @@ export function generatePetitions(w: World): Petition[] {
 }
 
 // ------------------------------------------------------------ annual review
+/** The town a design-day fire would take the largest share of, from the last yearly exposure survey. */
+function worstExposedTown(w: World): { id: number; share: number } {
+  let id = -1,
+    share = 0;
+  for (const t of w.memory.exposure?.towns ?? []) {
+    const s = t.homes > 0 ? t.exposed / t.homes : 0;
+    if (s > share) {
+      share = s;
+      id = t.id;
+    }
+  }
+  if (id < 0) {
+    // no survey yet: fall back on the firewise rating
+    const t = [...w.towns].sort((a, b) => a.firewise - b.firewise)[0];
+    return { id: t ? t.id : -1, share: t ? Math.max(0, 0.9 - t.firewise) : 0 };
+  }
+  return { id, share };
+}
+
 export function budgetFor(w: World): number {
   const diff = w.config.difficulty === 'gentle' ? 1.15 : w.config.difficulty === 'harsh' ? 0.85 : 1;
   const trust = w.trust;
   const pop = w.population;
   return Math.round(1_020_000 * diff * (0.55 + 0.9 * (trust / 100)) * (0.85 + 0.15 * (pop / 3400)));
+}
+
+function exposureRow(w: World): Array<[string, string]> {
+  const ex = w.memory.exposure;
+  if (!ex) return [];
+  const p = (x: number) => Math.round(x * 100) + ' %';
+  const prev = ex.history.length >= 2 ? ex.history[ex.history.length - 2] : ex.start;
+  return [['Homes a bad fire day would take', `${p(ex.now)} (${p(prev)} a year ago, ${p(ex.start)} when you arrived)`]];
 }
 
 /**
@@ -490,6 +523,7 @@ export function beginReview(w: World, closed: LedgerYear = w.economy.history.at(
     ['Council trust', `${Math.round(trust)} / 100`],
     ['Area burned', `${burned.toLocaleString()} ha (${high.toLocaleString()} ha severe)`],
     ['Homes lost', `${w.stats.structuresLost.at(-1) ?? 0}`],
+    ...exposureRow(w),
     ['Income / spending', `$${Math.round(tot.income / 1000)}k / $${Math.round(tot.expense / 1000)}k`],
     ['Balance', `$${Math.round(e.funds / 1000)}k`],
     ['Next year’s allocation', `$${Math.round(r.budgetNext / 1000)}k`],

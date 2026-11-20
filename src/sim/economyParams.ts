@@ -26,6 +26,9 @@ export const COST = {
   aidPerDay: 20_000, // the valley's share per day the team is assigned
 };
 
+/** How far into debt emergency fire spending may take the service before the county stops paying. */
+export const EMERGENCY_CREDIT = 400_000;
+
 export const CREW_COST = {
   hand: { hire: 25_000, yearly: 165_000 },
   engine: { hire: 30_000, yearly: 135_000 },

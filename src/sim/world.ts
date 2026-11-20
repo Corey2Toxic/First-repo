@@ -14,6 +14,7 @@ import type {
   FactionId,
   FactionState,
   FireEvent,
+  FireReport,
   Herd,
   Landmark,
   LedgerYear,
@@ -106,6 +107,7 @@ export const LAYER_SPECS = {
   // --- v2 ---
   fprog: 'f32', // fraction of the way an approaching fire front has come to this cell's centre
   under: 'f32', // understory regeneration 0..1: saplings and pole thickets that fill in where fire stays away (ladder fuel)
+  fstop: 'u8', // who put a burning cell out: 0 nobody (it burned out), 1 a hand crew, 2 an engine, 3 a water or retardant drop
 } as const satisfies Record<string, LayerType>;
 
 export type LayerName = keyof typeof LAYER_SPECS;
@@ -290,6 +292,21 @@ export interface WorldMemory {
   /** v2: air-tanker loads flown on `dropDay` */
   dropDay?: number;
   dropsToday?: number;
+  /**
+   * v2: what a design-day fire would do to the towns (projection.ts computeFireshed), taken when the
+   * tenure began and again each new year. `start` and `now` are the share of all homes it would take.
+   */
+  exposure?: {
+    start: number;
+    now: number;
+    year: number;
+    towns: Array<{ id: number; homes: number; exposed: number; risk: number; area12: number; crownEdge: number }>;
+    /** `now` at the end of each year, oldest first */
+    history: number[];
+  };
+  /** v2: day the season's fire outlook was last given, and the last day a fire-weather watch was issued for */
+  outlookYear?: number;
+  watchDay?: number;
 }
 
 export interface ReviewState {
@@ -339,6 +356,8 @@ export class World {
   colonies: Colony[] = [];
   /** Outside incident teams called to fires (v2). */
   aid: AidTeam[] = [];
+  /** After-action reports of finished fires, oldest first (v2; the most recent 60). */
+  reports: FireReport[] = [];
   towers: number[] = []; // cell indices
   camps: number[] = [];
   /** Burning cells in ignition order (kept sorted each sub-step for determinism) */
@@ -615,8 +634,9 @@ export class World {
     return p;
   }
 
-  notify(text: string, level: Notification['level'] = 'info', x?: number, y?: number, fireId?: number): void {
-    this.notifications.push({ id: this.nextId(), day: this.day, text, level, x, y, fireId });
+  /** `stop`: 1 asks the game to slow down for this, 2 to pause (the player can switch either off). */
+  notify(text: string, level: Notification['level'] = 'info', x?: number, y?: number, fireId?: number, stop?: 1 | 2): void {
+    this.notifications.push({ id: this.nextId(), day: this.day, text, level, x, y, fireId, stop });
     if (this.notifications.length > 200) this.notifications.splice(0, this.notifications.length - 200);
   }
 

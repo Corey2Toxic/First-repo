@@ -39,6 +39,7 @@ import type { CellFuel } from './systems/fuels.ts';
 import { droughtSeverity } from './systems/climate.ts';
 import { medianFuelMoisture } from './systems/moisture.ts';
 import { forecast } from './forecast.ts';
+import { discover } from './notes.ts';
 
 const HOURS = 24 / SUBSTEPS_PER_DAY;
 const { DX, DY, DIST } = STENCIL;
@@ -643,4 +644,31 @@ export function computeFireshed(w: World, cases: DesignCase[] = designCases(w)):
     te.risk = te.homes ? 100 * (te.exposed / te.homes) * clamp01(Math.sqrt(te.area12 / 1500)) : 0;
   }
   return { hours, town, behaviour, flame, towns, day: w.day };
+}
+
+/**
+ * Take the towns' exposure to a design-day fire and keep it in the world's memory: the figure the
+ * council's residents, the scenario objectives and the legacy score all read. Taken when a tenure
+ * begins and at every year's end.
+ */
+export function refreshExposure(w: World, endOfYear = false): void {
+  const fs = computeFireshed(w);
+  let homes = 0,
+    exposed = 0;
+  for (const t of fs.towns) {
+    homes += t.homes;
+    exposed += t.exposed;
+  }
+  const now = homes ? exposed / homes : 0;
+  const prev = w.memory.exposure;
+  const history = prev ? prev.history.slice(-60) : [];
+  if (endOfYear || !prev) history.push(Math.round(now * 1000) / 1000);
+  if (endOfYear) discover(w, 'fireshed');
+  w.memory.exposure = {
+    start: prev ? prev.start : now,
+    now,
+    year: w.year,
+    towns: fs.towns.map((t) => ({ id: t.id, homes: t.homes, exposed: Math.round(t.exposed * 10) / 10, risk: Math.round(t.risk), area12: t.area12, crownEdge: Math.round(t.crownEdge * 100) / 100 })),
+    history,
+  };
 }

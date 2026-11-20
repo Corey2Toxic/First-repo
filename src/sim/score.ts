@@ -9,6 +9,7 @@ import { vegetationSummary } from './systems/vegetation.ts';
 import { deerCount } from './systems/wildlife.ts';
 import { hazardIndex } from './systems/fuels.ts';
 import { distanceField } from './gen/settle.ts';
+import { objectives } from './objectives.ts';
 
 /** Mean fuel hazard of the land within 5 cells of standing homes (0–1). */
 export function homeHazard(w: World): number {
@@ -83,9 +84,13 @@ export function evaluateLegacy(w: World, reason: 'tenure' | 'dismissed' | 'bankr
   const regime = 8 * clamp01(goodRate / 0.01) * clamp01((lowShare - 0.4) / 0.5);
   // v1.0 scored the change in the valley-wide fuel index, which the player barely moves; what
   // protective work changes is the fuel next to homes
-  const endHome = homeHazard(w);
-  const startHome = m.startHomeHazard ?? endHome;
-  const resilience = 7 * clamp01(0.5 + (startHome - endHome) * 4);
+  // v2: scored on what a design-day fire would do to the homes (the fireshed's exposure), which is
+  // what thinning, burning and hardening around the towns actually change. Leaving it as found
+  // earns a third; halving it earns it all. (v1.1 scored the fuel index within 500 m of homes.)
+  const ex = m.exposure;
+  const startEx = ex?.start ?? 0,
+    endEx = ex?.now ?? startEx;
+  const resilience = 7 * clamp01(0.33 + (startEx > 0.01 ? ((startEx - endEx) / startEx) * 1.34 : 0.67));
   const deer = deerCount(w);
   // a healthy herd: 1–10 deer per km² (map-size independent) in fair condition. v1.0 used a fixed
   // 250–1,300 deer, i.e. 24 % of carrying capacity on large maps and 65 % on small ones (D15)
@@ -111,7 +116,7 @@ export function evaluateLegacy(w: World, reason: 'tenure' | 'dismissed' | 'bankr
     regime,
     `${burned.toLocaleString()} ha burned (${(goodRate * 100).toFixed(2)}% of the valley a year in good fire), ${Math.round(100 * (1 - lowShare))}% at high severity`,
   ]);
-  breakdown.push(['Safer around homes', resilience, `fuel hazard near homes ${(startHome * 100).toFixed(0)} → ${(endHome * 100).toFixed(0)}`]);
+  breakdown.push(['Safer around homes', resilience, `homes a bad fire day would take ${(startEx * 100).toFixed(0)} % → ${(endEx * 100).toFixed(0)} %`]);
   breakdown.push([
     'Wild things',
     wildlife,
@@ -131,11 +136,17 @@ export function evaluateLegacy(w: World, reason: 'tenure' | 'dismissed' | 'bankr
   const finNote = `ending balance ${Math.round(w.economy.funds / 1000)}k; ${Math.round(returned / 1000)}k returned unspent`;
   breakdown.push(['Sound finances', fin, '$' + finNote.replace('; ', '; $') + (w.economy.millOpen ? '' : '; the mill closed')]);
 
-  // trust (25 weighted by time served), counted from a baseline of indifference (~38) to enthusiasm (80)
+  // trust (16 weighted by time served), counted from a baseline of indifference (~38) to enthusiasm (80)
   const avgTrust = m.trustYears ? (m.trustSum ?? 0) / m.trustYears : w.trust;
   const served = clamp01(years / w.config.tenureYears);
-  const trust = 25 * clamp01((avgTrust - 38) / 42) * (reason === 'tenure' ? 1 : 0.6 + 0.4 * served);
+  const trust = 16 * clamp01((avgTrust - 38) / 42) * (reason === 'tenure' ? 1 : 0.6 + 0.4 * served);
   breakdown.push(['The council’s trust', trust, `average trust ${avgTrust.toFixed(0)}`]);
+
+  // the council's charge (9): what this valley asked of its warden in particular (v2; v1.x gave
+  // every scenario the same goal). Three points for each charge met.
+  const charges = objectives(w);
+  const metNow = charges.filter((o) => (o.kind === 'reach' ? o.progress >= 1 : o.state !== 'failed' && o.state !== 'behind'));
+  breakdown.push(['The council’s charge', 3 * metNow.length * (reason === 'tenure' ? 1 : served), charges.map((o) => `${metNow.includes(o) ? '✓' : '✗'} ${o.title}`).join(' · ')]);
 
   let score = breakdown.reduce((a, b) => a + b[1], 0);
   if (reason !== 'tenure') score *= 0.55 + 0.45 * served;
